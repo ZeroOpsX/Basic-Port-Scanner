@@ -7,12 +7,16 @@ from .scanner import (
     PORT_OPEN,
     PortScanner,
     PortStatus,
+    grab_banner,
     scan_port,
+    scan_ports_concurrent,
 )
 
 __all__ = [
     "PortScanner",
     "scan_port",
+    "scan_ports_concurrent",
+    "grab_banner",
     "is_host_online",
     "icmp_ping",
     "tcp_ping",

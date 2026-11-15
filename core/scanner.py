@@ -1,5 +1,5 @@
 """
-PortScanner engine implementation using socket connect_ex and ThreadPoolExecutor.
+PortScanner engine implementation using ThreadPoolExecutor for multi-threaded scanning.
 Classifies port states into OPEN, CLOSED (RST/refusal), and FILTERED (timeout).
 """
 
@@ -9,7 +9,7 @@ import logging
 import socket
 from typing import Callable, Dict, List, Optional
 
-from .constants import COMMON_PORTS, DEFAULT_TIMEOUT, DEFAULT_THREADS
+from .constants import COMMON_PORTS, DEFAULT_THREADS, DEFAULT_TIMEOUT
 
 try:
     from utils.logger import logger
@@ -72,10 +72,6 @@ def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> PortStatu
 
     Returns:
         PortStatus enum-like string: 'OPEN', 'CLOSED', or 'FILTERED'.
-
-    Examples:
-        >>> scan_port("127.0.0.1", 80, timeout=1.0)
-        'CLOSED'
     """
     sock = None
     try:
@@ -90,7 +86,7 @@ def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> PortStatu
         elif status in FILTERED_ERRNOS:
             return PortStatus.FILTERED
         else:
-            return PortStatus.CLOSED if status == 111 or status == 10061 else PortStatus.FILTERED
+            return PortStatus.CLOSED if status in (111, 10061) else PortStatus.FILTERED
 
     except socket.timeout:
         # No response received before timeout: packet dropped or filtered
@@ -113,8 +109,100 @@ def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> PortStatu
                 pass
 
 
+def grab_banner(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> str:
+    """
+    Attempts to retrieve a service banner from an open TCP port.
+    """
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        if sock.connect_ex((ip, port)) == 0:
+            sock.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
+            banner = sock.recv(1024).decode("utf-8", errors="ignore").strip()
+            return banner.splitlines()[0] if banner else ""
+        return ""
+    except (socket.timeout, socket.gaierror, socket.error, OSError, KeyboardInterrupt):
+        return ""
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+def scan_ports_concurrent(
+    ip: str,
+    ports: List[int],
+    timeout: float = DEFAULT_TIMEOUT,
+    max_workers: int = DEFAULT_THREADS,
+    grab_banners: bool = False,
+    include_closed: bool = False,
+    on_port_scanned: Optional[Callable[[Dict], None]] = None,
+) -> List[Dict]:
+    """
+    Multi-threaded port scanning loop using concurrent.futures.ThreadPoolExecutor.
+
+    Distributes port checks across a worker pool, yielding real-time callback
+    events and returning a sorted list of discovered open ports.
+
+    Args:
+        ip: Target IPv4 address or hostname.
+        ports: List of port integers to scan.
+        timeout: Socket timeout per port in seconds.
+        max_workers: Concurrency thread pool size (default: 100).
+        grab_banners: Whether to attempt service banner grabbing on open ports.
+        include_closed: If True, includes CLOSED and FILTERED ports in results.
+        on_port_scanned: Optional callback function invoked when a port probe completes.
+
+    Returns:
+        Sorted list of discovered port dictionaries.
+    """
+    if not ports:
+        return []
+
+    workers = max(1, min(max_workers, len(ports)))
+    results: List[Dict] = []
+
+    def _worker(port: int) -> Optional[Dict]:
+        state = scan_port(ip, port, timeout=timeout)
+        if not include_closed and state != PortStatus.OPEN:
+            return None
+
+        service = COMMON_PORTS.get(port, "Unknown")
+        banner = ""
+        if state == PortStatus.OPEN and grab_banners:
+            banner = grab_banner(ip, port, timeout=timeout)
+
+        record = {
+            "port": port,
+            "state": str(state),
+            "service": service,
+            "banner": banner,
+        }
+        return record
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_port = {executor.submit(_worker, port): port for port in ports}
+
+        for future in as_completed(future_to_port):
+            try:
+                res = future.result()
+                if res:
+                    results.append(res)
+                    if on_port_scanned:
+                        on_port_scanned(res)
+            except Exception as err:
+                logger.error(f"Error scanning port {future_to_port[future]}: {err}")
+
+    # Sort results numerically by port number
+    results.sort(key=lambda x: x["port"])
+    return results
+
+
 class PortScanner:
-    """Multi-threaded TCP Port Scanner Engine."""
+    """Multi-threaded TCP Port Scanner Engine leveraging ThreadPoolExecutor."""
 
     def __init__(
         self,
@@ -142,16 +230,7 @@ class PortScanner:
         include_closed: bool = False,
     ) -> Optional[Dict]:
         """
-        Scans an individual TCP port on the scanner target and classifies its state.
-
-        Args:
-            port: Port number to scan.
-            grab_banner: Whether to attempt banner grabbing on open ports.
-            timeout: Optional per-call timeout override; defaults to self.timeout.
-            include_closed: If True, returns result even if port is CLOSED or FILTERED.
-
-        Returns:
-            Dictionary with port info and classified state ("OPEN", "CLOSED", or "FILTERED").
+        Scans an individual TCP port on the scanner target.
         """
         active_timeout = timeout if timeout is not None else self.timeout
         state = scan_port(self.target_ip, port, timeout=active_timeout)
@@ -162,7 +241,7 @@ class PortScanner:
         service = COMMON_PORTS.get(port, "Unknown")
         banner = ""
         if state == PortStatus.OPEN and grab_banner:
-            banner = self._grab_banner(port, timeout=active_timeout)
+            banner = grab_banner(self.target_ip, port, timeout=active_timeout)
 
         return {
             "port": port,
@@ -171,62 +250,24 @@ class PortScanner:
             "banner": banner,
         }
 
-    def _grab_banner(self, port: int, timeout: Optional[float] = None) -> str:
-        """Attempt to grab a service banner from an open port."""
-        active_timeout = timeout if timeout is not None else self.timeout
-        sock = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(active_timeout)
-            if sock.connect_ex((self.target_ip, port)) == 0:
-                sock.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
-                banner = sock.recv(1024).decode("utf-8", errors="ignore").strip()
-                return banner.splitlines()[0] if banner else ""
-            return ""
-        except (socket.timeout, socket.gaierror, socket.error, OSError, KeyboardInterrupt):
-            return ""
-        finally:
-            if sock:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-
     def scan_ports(
         self,
         ports: List[int],
         grab_banner: bool = False,
         timeout: Optional[float] = None,
         on_port_scanned: Optional[Callable[[Dict], None]] = None,
+        include_closed: bool = False,
     ) -> List[Dict]:
         """
-        Scans a list of ports concurrently using ThreadPoolExecutor.
-
-        Args:
-            ports: List of port integers to scan.
-            grab_banner: Flag to attempt service banner grabbing.
-            timeout: Optional dynamic timeout override for each port scan.
-            on_port_scanned: Optional callback function triggered when an open port is discovered.
-
-        Returns:
-            Sorted list of open port detail dictionaries.
+        Multi-threaded scanning loop using ThreadPoolExecutor.
         """
         active_timeout = timeout if timeout is not None else self.timeout
-        open_ports: List[Dict] = []
-
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_port = {
-                executor.submit(self.scan_port, port, grab_banner, active_timeout): port
-                for port in ports
-            }
-
-            for future in as_completed(future_to_port):
-                res = future.result()
-                if res:
-                    open_ports.append(res)
-                    if on_port_scanned:
-                        on_port_scanned(res)
-
-        # Sort results numerically by port number
-        open_ports.sort(key=lambda x: x["port"])
-        return open_ports
+        return scan_ports_concurrent(
+            ip=self.target_ip,
+            ports=ports,
+            timeout=active_timeout,
+            max_workers=self.max_workers,
+            grab_banners=grab_banner,
+            include_closed=include_closed,
+            on_port_scanned=on_port_scanned,
+        )

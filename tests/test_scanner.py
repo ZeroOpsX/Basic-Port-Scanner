@@ -150,6 +150,26 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(result["state"], "CLOSED")
 
     @patch("socket.socket")
+    def test_scan_ports_concurrent(self, mock_socket_cls):
+        from core.scanner import scan_ports_concurrent
+        mock_sock = MagicMock()
+        # Ports 80 and 443 open, 8080 closed
+        mock_sock.connect_ex.side_effect = lambda addr: 0 if addr[1] in (80, 443) else 111
+        mock_socket_cls.return_value = mock_sock
+
+        discovered = []
+        results = scan_ports_concurrent(
+            ip="127.0.0.1",
+            ports=[80, 443, 8080],
+            timeout=0.5,
+            max_workers=5,
+            on_port_scanned=lambda res: discovered.append(res["port"]),
+        )
+        self.assertEqual(len(results), 2)
+        self.assertEqual([r["port"] for r in results], [80, 443])
+        self.assertEqual(sorted(discovered), [80, 443])
+
+    @patch("socket.socket")
     def test_scan_port_handles_gaierror(self, mock_socket_cls):
         from core.scanner import scan_port
         mock_sock = MagicMock()

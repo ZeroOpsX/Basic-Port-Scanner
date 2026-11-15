@@ -12,7 +12,7 @@ from typing import Any, Dict
 
 from core.constants import COMMON_PORTS
 from core.host_discovery import is_host_online
-from core.scanner import scan_port
+from core.scanner import scan_port, scan_ports_concurrent
 from utils.banner import print_banner
 from utils.cli import parse_arguments
 from utils.helpers import export_results
@@ -165,29 +165,28 @@ def main():
     # Print scan header with start time
     logger.info(f"Target: {canonical_target} ({target_ip})")
     logger.info(f"Scan Started at: {start_time_str}")
-    logger.info(f"Initiating sequential scan on {len(ports)} port(s) (Timeout: {args.timeout}s)...")
+    logger.info(
+        f"Initiating multi-threaded scan on {len(ports)} port(s) with {args.workers} workers (Timeout: {args.timeout}s)..."
+    )
     print("-" * 65)
     print(f"{'PORT':<12}{'STATE':<10}{'SERVICE':<15}")
     print("-" * 65)
 
-    # 5. Iterate through the parsed port list and scan sequentially using scanner.py
-    for port in ports:
-        if scan_context["interrupted"]:
-            break
+    def on_port_discovered(port_entry: dict):
+        scan_context["open_ports"].append(port_entry)
+        port_label = f"{port_entry['port']}/tcp"
+        print(f"{port_label:<12}{'OPEN':<10}{port_entry['service']:<15}")
 
-        scan_context["scanned_count"] += 1
-        is_open = scan_port(target_ip, port, timeout=args.timeout)
-
-        if is_open:
-            service = COMMON_PORTS.get(port, "Unknown")
-            port_entry = {
-                "port": port,
-                "state": "OPEN",
-                "service": service,
-            }
-            scan_context["open_ports"].append(port_entry)
-            port_label = f"{port}/tcp"
-            print(f"{port_label:<12}{'OPEN':<10}{service:<15}")
+    # 5. Multi-threaded scanning loop using concurrent.futures.ThreadPoolExecutor
+    scan_ports_concurrent(
+        ip=target_ip,
+        ports=ports,
+        timeout=args.timeout,
+        max_workers=args.workers,
+        grab_banners=args.banner,
+        on_port_scanned=on_port_discovered,
+    )
+    scan_context["scanned_count"] = len(ports)
 
     # Record exact end time and duration
     end_timestamp = time.time()
