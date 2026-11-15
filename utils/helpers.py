@@ -5,35 +5,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
+from .cli import parse_ports
 
-def parse_port_range(port_str: str) -> List[int]:
-    """
-    Parses port specification strings into a sorted list of unique port integers.
-    Supports formats:
-      - Single port: "80"
-      - Comma-separated: "80,443,8080"
-      - Range: "1-1024"
-      - Combined: "22,80-85,443"
-    """
-    ports = set()
-    parts = [p.strip() for p in port_str.split(",") if p.strip()]
-
-    for part in parts:
-        if "-" in part:
-            sub_parts = part.split("-")
-            if len(sub_parts) != 2:
-                raise ValueError(f"Invalid range format: '{part}'")
-            start, end = int(sub_parts[0]), int(sub_parts[1])
-            if start > end or start < 1 or end > 65535:
-                raise ValueError(f"Port range out of valid boundaries (1-65535): '{part}'")
-            ports.update(range(start, end + 1))
-        else:
-            port = int(part)
-            if port < 1 or port > 65535:
-                raise ValueError(f"Port out of valid range (1-65535): {port}")
-            ports.add(port)
-
-    return sorted(list(ports))
+# Backwards compatibility alias
+parse_port_range = parse_ports
 
 
 def validate_target(target: str) -> bool:

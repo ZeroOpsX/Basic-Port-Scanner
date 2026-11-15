@@ -127,6 +127,32 @@ class TestCLI(unittest.TestCase):
                 parse_arguments([])
         self.assertEqual(cm.exception.code, 2)
 
+    def test_parse_ports_single(self):
+        from utils.cli import parse_ports
+        self.assertEqual(parse_ports("80"), [80])
+
+    def test_parse_ports_comma_separated(self):
+        from utils.cli import parse_ports
+        self.assertEqual(parse_ports("80,443"), [80, 443])
+
+    def test_parse_ports_range(self):
+        from utils.cli import parse_ports
+        ports = parse_ports("1-1000")
+        self.assertEqual(len(ports), 1000)
+        self.assertEqual(ports[0], 1)
+        self.assertEqual(ports[-1], 1000)
+
+    def test_parse_ports_combined_with_whitespace(self):
+        from utils.cli import parse_ports
+        self.assertEqual(parse_ports(" 22, 80 , 100-102 "), [22, 80, 100, 101, 102])
+
+    def test_cli_ports_list_parsing(self):
+        from utils.cli import parse_arguments
+        args = parse_arguments(["-t", "127.0.0.1", "-p", "1-1000"])
+        self.assertEqual(len(args.ports_list), 1000)
+        self.assertEqual(args.ports_list[0], 1)
+        self.assertEqual(args.ports_list[-1], 1000)
+
 
 if __name__ == "__main__":
     unittest.main()

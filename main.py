@@ -26,18 +26,7 @@ def main():
         print(f"[!] Error: Invalid target '{args.target}'")
         sys.exit(1)
 
-    # Determine port list
-    if args.common:
-        ports = sorted(list(COMMON_PORTS.keys()))
-    elif args.ports:
-        try:
-            ports = parse_port_range(args.ports)
-        except ValueError as e:
-            print(f"[!] Error parsing ports: {e}")
-            sys.exit(1)
-    else:
-        # Default standard range: 1 - 1024
-        ports = list(range(1, 1025))
+    ports = args.ports_list
 
     # Initialize scanner
     try:
