@@ -26,7 +26,7 @@ except ImportError:
     TOP_100_PORTS_LIST = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080, 8443]
 
 CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | TARGET) [-p PORTS | --common | --top-ports]
-                [-Pn] [-w WORKERS] [--timeout TIMEOUT] [-b] [-o {json,txt}] [-q] [-v]"""
+                [-Pn] [-T THREADS] [--timeout TIMEOUT] [-b] [-o {json,txt}] [-q] [-v]"""
 
 CUSTOM_DESCRIPTION = f"""
 ================================================================================
@@ -44,8 +44,11 @@ Examples:
   # Scan comma-separated ports:
   python main.py -t 192.168.1.1 -p 80,443,8080
 
-  # Scan a port range:
-  python main.py -t scanme.nmap.org -p 1-1000 -w 200
+  # Scan a port range with custom thread count:
+  python main.py -t scanme.nmap.org -p 1-1000 -T 200
+
+  # Scan top 100 ports with 150 worker threads:
+  python main.py -t example.com --top-ports --threads 150
 
   # Combined single ports and ranges:
   python main.py -t example.com -p 22,80-90,443,8000-8080 -b
@@ -193,11 +196,14 @@ def create_parser() -> argparse.ArgumentParser:
         help=f"Socket connection timeout in seconds (default: {DEFAULT_TIMEOUT}s)",
     )
     perf_group.add_argument(
+        "-T",
+        "--threads",
         "-w",
         "--workers",
+        dest="threads",
         type=int,
         default=DEFAULT_THREADS,
-        help=f"Number of concurrent worker threads (default: {DEFAULT_THREADS})",
+        help=f"Number of concurrent worker threads for ThreadPoolExecutor (default: {DEFAULT_THREADS})",
     )
 
     # Scanning Features & Output
@@ -269,6 +275,15 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
             file=sys.stderr,
         )
         sys.exit(2)
+
+    # Validate threads argument and map workers alias
+    if parsed_args.threads < 1:
+        print(
+            f"[!] Error: Thread count must be at least 1 (received: {parsed_args.threads}).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    parsed_args.workers = parsed_args.threads
 
     # Parse port specifications into a list of integers
     if parsed_args.top_ports:

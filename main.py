@@ -166,7 +166,7 @@ def main():
     logger.info(f"Target: {canonical_target} ({target_ip})")
     logger.info(f"Scan Started at: {start_time_str}")
     logger.info(
-        f"Initiating multi-threaded scan on {len(ports)} port(s) with {args.workers} workers (Timeout: {args.timeout}s)..."
+        f"Initiating multi-threaded scan on {len(ports)} port(s) with {args.threads} worker threads (Timeout: {args.timeout}s)..."
     )
     print("-" * 65)
     print(f"{'PORT':<12}{'STATE':<10}{'SERVICE':<15}")
@@ -182,7 +182,7 @@ def main():
         ip=target_ip,
         ports=ports,
         timeout=args.timeout,
-        max_workers=args.workers,
+        max_workers=args.threads,
         grab_banners=args.banner,
         on_port_scanned=on_port_discovered,
     )

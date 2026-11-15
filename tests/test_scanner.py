@@ -284,6 +284,28 @@ class TestCLI(unittest.TestCase):
                 parse_arguments(["-t", "127.0.0.1", "--timeout", "-1.0"])
         self.assertEqual(cm.exception.code, 2)
 
+    def test_cli_threads_arguments(self):
+        from utils.cli import parse_arguments
+        # Test -T
+        args_short = parse_arguments(["-t", "127.0.0.1", "-T", "50"])
+        self.assertEqual(args_short.threads, 50)
+        self.assertEqual(args_short.workers, 50)
+
+        # Test --threads
+        args_long = parse_arguments(["-t", "127.0.0.1", "--threads", "200"])
+        self.assertEqual(args_long.threads, 200)
+        self.assertEqual(args_long.workers, 200)
+
+        # Test default
+        args_default = parse_arguments(["-t", "127.0.0.1"])
+        self.assertEqual(args_default.threads, 100)
+
+        # Test invalid threads (< 1)
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.stderr"):
+                parse_arguments(["-t", "127.0.0.1", "-T", "0"])
+        self.assertEqual(cm.exception.code, 2)
+
     def test_cli_pn_flag(self):
         from utils.cli import parse_arguments
         args_short = parse_arguments(["-t", "127.0.0.1", "-Pn"])
