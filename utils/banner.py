@@ -25,7 +25,7 @@ BANNER = r"""
 |_| \_|\___|\__|_|    \__,_|_|___/\___|
 """
 
-VERSION = "1.0.0"
+from .config import AUTHOR, TOOL_NAME, VERSION
 
 
 def print_banner() -> None:

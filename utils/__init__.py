@@ -1,6 +1,29 @@
-"""Utility functions for CLI parsing, display banners, and report output."""
+"""Utility functions for CLI parsing, display banners, configuration, and report output."""
 
 from .banner import print_banner
+from .config import (
+    AUTHOR,
+    COMMON_PORTS,
+    COMMON_PORTS_LIST,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_THREADS,
+    DEFAULT_TIMEOUT,
+    TOOL_NAME,
+    VERSION,
+)
 from .helpers import export_results, parse_port_range, validate_target
 
-__all__ = ["print_banner", "parse_port_range", "validate_target", "export_results"]
+__all__ = [
+    "print_banner",
+    "parse_port_range",
+    "validate_target",
+    "export_results",
+    "TOOL_NAME",
+    "VERSION",
+    "AUTHOR",
+    "DEFAULT_TIMEOUT",
+    "DEFAULT_THREADS",
+    "DEFAULT_OUTPUT_DIR",
+    "COMMON_PORTS",
+    "COMMON_PORTS_LIST",
+]
