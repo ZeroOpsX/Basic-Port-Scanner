@@ -7,12 +7,16 @@ from utils.config import (
     DEFAULT_THREADS,
     DEFAULT_TIMEOUT,
     TOOL_NAME,
+    TOP_100_PORTS,
+    TOP_100_PORTS_LIST,
     VERSION,
 )
 
 __all__ = [
     "COMMON_PORTS",
     "COMMON_PORTS_LIST",
+    "TOP_100_PORTS",
+    "TOP_100_PORTS_LIST",
     "DEFAULT_TIMEOUT",
     "DEFAULT_THREADS",
     "DEFAULT_OUTPUT_DIR",

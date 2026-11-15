@@ -9,15 +9,23 @@ import sys
 from typing import List, Optional
 
 try:
-    from .config import COMMON_PORTS_LIST, DEFAULT_THREADS, DEFAULT_TIMEOUT, TOOL_NAME, VERSION
+    from .config import (
+        COMMON_PORTS_LIST,
+        DEFAULT_THREADS,
+        DEFAULT_TIMEOUT,
+        TOOL_NAME,
+        TOP_100_PORTS_LIST,
+        VERSION,
+    )
 except ImportError:
     TOOL_NAME = "NetPulse"
     VERSION = "1.0.0"
     DEFAULT_TIMEOUT = 1.5
     DEFAULT_THREADS = 100
     COMMON_PORTS_LIST = [20, 21, 22, 23, 25, 53, 80, 110, 143, 443, 3306, 3389, 8080]
+    TOP_100_PORTS_LIST = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080, 8443]
 
-CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | TARGET) [-p PORTS | --common]
+CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | TARGET) [-p PORTS | --common | --top-ports]
                 [-Pn] [-w WORKERS] [--timeout TIMEOUT] [-b] [-o {json,txt}] [-q] [-v]"""
 
 CUSTOM_DESCRIPTION = f"""
@@ -44,6 +52,9 @@ Examples:
 
   # Scan top common ports and export results:
   python main.py --target 127.0.0.1 --common -o json
+
+  # Scan top 100 most common TCP ports:
+  python main.py -t scanme.nmap.org --top-ports
 
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
@@ -155,6 +166,12 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Scan top standard common ports only (HTTP, SSH, MySQL, etc.)",
     )
+    port_group.add_argument(
+        "--top-ports",
+        dest="top_ports",
+        action="store_true",
+        help="Scan the top 100 most common TCP ports based on Nmap statistics",
+    )
 
     # Host Discovery Options
     discovery_group = parser.add_argument_group("Host Discovery Options")
@@ -254,7 +271,9 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
         sys.exit(2)
 
     # Parse port specifications into a list of integers
-    if parsed_args.common:
+    if parsed_args.top_ports:
+        parsed_args.ports_list = TOP_100_PORTS_LIST
+    elif parsed_args.common:
         parsed_args.ports_list = COMMON_PORTS_LIST
     elif parsed_args.ports:
         try:

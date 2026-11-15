@@ -10,6 +10,8 @@ from .config import (
     DEFAULT_THREADS,
     DEFAULT_TIMEOUT,
     TOOL_NAME,
+    TOP_100_PORTS,
+    TOP_100_PORTS_LIST,
     VERSION,
 )
 from .helpers import export_results, parse_port_range, validate_target
@@ -47,4 +49,6 @@ __all__ = [
     "DEFAULT_OUTPUT_DIR",
     "COMMON_PORTS",
     "COMMON_PORTS_LIST",
+    "TOP_100_PORTS",
+    "TOP_100_PORTS_LIST",
 ]

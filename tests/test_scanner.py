@@ -240,6 +240,20 @@ class TestCLI(unittest.TestCase):
         args_default = parse_arguments(["-t", "127.0.0.1"])
         self.assertFalse(args_default.Pn)
 
+    def test_cli_top_ports_flag(self):
+        from utils.cli import parse_arguments
+        from utils.config import TOP_100_PORTS, TOP_100_PORTS_LIST
+
+        self.assertEqual(len(TOP_100_PORTS), 100)
+        self.assertEqual(len(TOP_100_PORTS_LIST), 100)
+
+        args = parse_arguments(["-t", "127.0.0.1", "--top-ports"])
+        self.assertTrue(args.top_ports)
+        self.assertEqual(len(args.ports_list), 100)
+        self.assertIn(80, args.ports_list)
+        self.assertIn(443, args.ports_list)
+        self.assertIn(22, args.ports_list)
+
 
 class TestValidators(unittest.TestCase):
     """Tests for utils/validators.py using ipaddress module."""
