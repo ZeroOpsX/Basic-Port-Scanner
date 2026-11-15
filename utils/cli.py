@@ -26,7 +26,7 @@ except ImportError:
     TOP_100_PORTS_LIST = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080, 8443]
 
 CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | TARGET) [-p PORTS | --common | --top-ports]
-                [-Pn] [-T THREADS] [--timeout TIMEOUT] [-b] [-o {json,txt}] [-q] [-v]"""
+                [-Pn] [-T THREADS] [--timeout TIMEOUT] [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
 
 CUSTOM_DESCRIPTION = f"""
 ================================================================================
@@ -58,6 +58,9 @@ Examples:
 
   # Scan top 100 most common TCP ports:
   python main.py -t scanme.nmap.org --top-ports
+
+  # Rate-limited scan (50ms delay between requests) to evade firewall thresholds:
+  python main.py -t 192.168.1.1 --top-ports --rate-limit 50
 
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
@@ -196,6 +199,13 @@ def create_parser() -> argparse.ArgumentParser:
         help=f"Socket connection timeout in seconds (default: {DEFAULT_TIMEOUT}s)",
     )
     perf_group.add_argument(
+        "--rate-limit",
+        dest="rate_limit",
+        type=float,
+        default=0.0,
+        help="Delay in milliseconds between requests per worker to evade firewall rate-limiting (default: 0ms)",
+    )
+    perf_group.add_argument(
         "-T",
         "--threads",
         "-w",
@@ -284,6 +294,14 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
         )
         sys.exit(2)
     parsed_args.workers = parsed_args.threads
+
+    # Validate rate-limit argument
+    if parsed_args.rate_limit < 0:
+        print(
+            f"[!] Error: Rate limit must be 0 or a positive number (received: {parsed_args.rate_limit}ms).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     # Parse port specifications into a list of integers
     if parsed_args.top_ports:

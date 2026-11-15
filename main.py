@@ -165,8 +165,9 @@ def main():
     # Print scan header with start time
     logger.info(f"Target: {canonical_target} ({target_ip})")
     logger.info(f"Scan Started at: {start_time_str}")
+    rate_limit_msg = f" | Rate Limit: {args.rate_limit}ms" if args.rate_limit > 0 else ""
     logger.info(
-        f"Initiating multi-threaded scan on {len(ports)} port(s) with {args.threads} worker threads (Timeout: {args.timeout}s)..."
+        f"Initiating multi-threaded scan on {len(ports)} port(s) with {args.threads} worker threads (Timeout: {args.timeout}s{rate_limit_msg})..."
     )
     print("-" * 65)
     print(f"{'PORT':<12}{'STATE':<10}{'SERVICE':<15}")
@@ -177,12 +178,13 @@ def main():
         port_label = f"{port_entry['port']}/tcp"
         print(f"{port_label:<12}{'OPEN':<10}{port_entry['service']:<15}")
 
-    # 5. Multi-threaded scanning loop using concurrent.futures.ThreadPoolExecutor
+    # 5. Multi-threaded scanning loop using queue.Queue & concurrent.futures.ThreadPoolExecutor
     scan_ports_concurrent(
         ip=target_ip,
         ports=ports,
         timeout=args.timeout,
         max_workers=args.threads,
+        rate_limit_ms=args.rate_limit,
         grab_banners=args.banner,
         on_port_scanned=on_port_discovered,
     )

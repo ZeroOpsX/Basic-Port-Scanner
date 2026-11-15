@@ -198,6 +198,25 @@ class TestScanner(unittest.TestCase):
             extracted.append(q.get_nowait())
         self.assertEqual(extracted, ports)
 
+    @patch("time.sleep")
+    @patch("socket.socket")
+    def test_scan_ports_concurrent_rate_limiting(self, mock_socket_cls, mock_sleep):
+        from core.scanner import scan_ports_concurrent
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 0
+        mock_socket_cls.return_value = mock_sock
+
+        results = scan_ports_concurrent(
+            ip="127.0.0.1",
+            ports=[80, 443],
+            timeout=0.1,
+            max_workers=1,
+            rate_limit_ms=50.0,
+        )
+        self.assertEqual(len(results), 2)
+        # Verify time.sleep was called with 50ms (0.05 seconds)
+        mock_sleep.assert_called_with(0.05)
+
     @patch("socket.socket")
     def test_scan_port_handles_gaierror(self, mock_socket_cls):
         from core.scanner import scan_port
@@ -333,6 +352,21 @@ class TestCLI(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             with patch("sys.stderr"):
                 parse_arguments(["-t", "127.0.0.1", "-T", "0"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_cli_rate_limit_argument(self):
+        from utils.cli import parse_arguments
+        args = parse_arguments(["-t", "127.0.0.1", "--rate-limit", "50.5"])
+        self.assertAlmostEqual(args.rate_limit, 50.5)
+
+        # Default should be 0.0
+        args_default = parse_arguments(["-t", "127.0.0.1"])
+        self.assertAlmostEqual(args_default.rate_limit, 0.0)
+
+        # Negative rate-limit exits
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.stderr"):
+                parse_arguments(["-t", "127.0.0.1", "--rate-limit", "-10"])
         self.assertEqual(cm.exception.code, 2)
 
     def test_cli_pn_flag(self):

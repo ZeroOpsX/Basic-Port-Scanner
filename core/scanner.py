@@ -10,6 +10,7 @@ import logging
 import queue
 import socket
 import threading
+import time
 from typing import Callable, Dict, List, Optional
 
 from .constants import COMMON_PORTS, DEFAULT_THREADS, DEFAULT_TIMEOUT
@@ -148,6 +149,7 @@ def scan_ports_concurrent(
     ports: List[int],
     timeout: float = DEFAULT_TIMEOUT,
     max_workers: int = DEFAULT_THREADS,
+    rate_limit_ms: float = 0.0,
     grab_banners: bool = False,
     include_closed: bool = False,
     on_port_scanned: Optional[Callable[[Dict], None]] = None,
@@ -156,14 +158,14 @@ def scan_ports_concurrent(
     High-performance multi-threaded port scanner powered by queue.Queue and ThreadPoolExecutor.
 
     Distributes all ports (including full 1-65535 ranges) through a thread-safe queue.Queue.
-    Instead of instantiating 65,535 Future objects in memory, a pool of persistent worker
-    threads pulls ports from the queue until exhausted.
+    Supports optional rate-limiting delays to evade firewall tripwires.
 
     Args:
         ip: Target IPv4 address or hostname.
         ports: List of port integers to scan (can scale up to all 65,535 ports).
         timeout: Socket timeout per port in seconds.
         max_workers: Concurrency thread pool size (default: 100).
+        rate_limit_ms: Delay in milliseconds between requests per worker (default: 0.0).
         grab_banners: Whether to attempt service banner grabbing on open ports.
         include_closed: If True, includes CLOSED and FILTERED ports in results.
         on_port_scanned: Optional callback function invoked when a port probe completes.
@@ -190,6 +192,10 @@ def scan_ports_concurrent(
                 break
 
             try:
+                # Apply rate-limiting delay between requests if configured
+                if rate_limit_ms > 0:
+                    time.sleep(rate_limit_ms / 1000.0)
+
                 state = scan_port(ip, port, timeout=timeout)
                 if include_closed or state == PortStatus.OPEN:
                     service = COMMON_PORTS.get(port, "Unknown")
@@ -236,10 +242,12 @@ class PortScanner:
         target: str,
         timeout: float = DEFAULT_TIMEOUT,
         max_workers: int = DEFAULT_THREADS,
+        rate_limit_ms: float = 0.0,
     ):
         self.raw_target = target
         self.timeout = timeout
         self.max_workers = max_workers
+        self.rate_limit_ms = rate_limit_ms
         self.target_ip = self._resolve_target(target)
         self.lock = threading.Lock()
 
@@ -281,6 +289,7 @@ class PortScanner:
         ports: List[int],
         grab_banner: bool = False,
         timeout: Optional[float] = None,
+        rate_limit_ms: Optional[float] = None,
         on_port_scanned: Optional[Callable[[Dict], None]] = None,
         include_closed: bool = False,
     ) -> List[Dict]:
@@ -288,11 +297,13 @@ class PortScanner:
         Multi-threaded scanning loop using queue.Queue and ThreadPoolExecutor.
         """
         active_timeout = timeout if timeout is not None else self.timeout
+        active_rate_limit = rate_limit_ms if rate_limit_ms is not None else self.rate_limit_ms
         return scan_ports_concurrent(
             ip=self.target_ip,
             ports=ports,
             timeout=active_timeout,
             max_workers=self.max_workers,
+            rate_limit_ms=active_rate_limit,
             grab_banners=grab_banner,
             include_closed=include_closed,
             on_port_scanned=on_port_scanned,
