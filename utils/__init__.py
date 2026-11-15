@@ -14,7 +14,14 @@ from .config import (
 )
 from .helpers import export_results, parse_port_range, validate_target
 from .logger import logger, setup_logger
-from .validators import is_valid_hostname, is_valid_ipv4, resolve_target, validate_ipv4
+from .validators import (
+    is_valid_hostname,
+    is_valid_ipv4,
+    resolve_domain,
+    resolve_domain_to_ipv4,
+    resolve_target,
+    validate_ipv4,
+)
 
 __all__ = [
     "create_parser",
@@ -25,6 +32,8 @@ __all__ = [
     "validate_target",
     "is_valid_ipv4",
     "validate_ipv4",
+    "resolve_domain",
+    "resolve_domain_to_ipv4",
     "is_valid_hostname",
     "resolve_target",
     "export_results",

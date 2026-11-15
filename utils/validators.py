@@ -1,6 +1,7 @@
 """
 Target and Network Input Validation Module for NetPulse.
-Uses Python's standard `ipaddress` module for robust IP address verification.
+Uses Python's standard `ipaddress` module for robust IP address verification
+and `socket.gethostbyname()` for domain resolution with comprehensive error handling.
 """
 
 import ipaddress
@@ -33,7 +34,7 @@ def is_valid_ipv4(target: str) -> bool:
     cleaned_target = target.strip()
 
     try:
-        ip = ipaddress.IPv4Address(cleaned_target)
+        ipaddress.IPv4Address(cleaned_target)
         return True
     except (ipaddress.AddressValueError, ValueError, TypeError):
         return False
@@ -63,10 +64,77 @@ def validate_ipv4(target: str) -> str:
         raise ValueError(f"Invalid IPv4 address '{target}': {err}")
 
 
+def resolve_domain(domain: str) -> Optional[str]:
+    """
+    Resolves a domain name (e.g., 'example.com') to an IPv4 address using socket.gethostbyname().
+    Gracefully handles non-existent domains, socket errors, and malformed inputs.
+
+    Args:
+        domain: Domain name or hostname to resolve.
+
+    Returns:
+        Resolved IPv4 address string (e.g., '93.184.216.34') if successful, or None if domain doesn't exist.
+
+    Examples:
+        >>> resolve_domain("localhost")
+        '127.0.0.1'
+        >>> resolve_domain("nonexistent-domain-xyz123456.invalid")
+        None
+    """
+    if not domain or not isinstance(domain, str):
+        return None
+
+    # Strip accidental protocol prefixes (http://, https://) or trailing paths/ports
+    clean_domain = domain.strip().lower()
+    clean_domain = re.sub(r"^https?://", "", clean_domain).split("/")[0].split(":")[0]
+
+    if not clean_domain:
+        return None
+
+    try:
+        return socket.gethostbyname(clean_domain)
+    except (socket.gaierror, socket.herror, socket.error):
+        # Domain not found (Errno 11001/EAI_NONAME) or network lookup failure
+        return None
+
+
+def resolve_domain_to_ipv4(domain: str) -> str:
+    """
+    Resolves a domain name to an IPv4 address using socket.gethostbyname().
+    Raises a descriptive ValueError if the domain does not exist or resolution fails.
+
+    Args:
+        domain: Domain name or hostname to resolve (e.g., 'example.com').
+
+    Returns:
+        The resolved IPv4 address as a string.
+
+    Raises:
+        ValueError: If the domain input is empty or the domain does not exist in DNS.
+    """
+    if not domain or not isinstance(domain, str):
+        raise ValueError("Domain must be a non-empty string.")
+
+    clean_domain = domain.strip().lower()
+    clean_domain = re.sub(r"^https?://", "", clean_domain).split("/")[0].split(":")[0]
+
+    if not clean_domain:
+        raise ValueError("Domain name cannot be empty.")
+
+    try:
+        return socket.gethostbyname(clean_domain)
+    except socket.gaierror as err:
+        raise ValueError(
+            f"Failed to resolve domain '{clean_domain}': Domain does not exist or DNS lookup failed."
+        ) from err
+    except socket.herror as err:
+        raise ValueError(f"Host error encountered while resolving '{clean_domain}': {err}") from err
+    except socket.error as err:
+        raise ValueError(f"Socket error while resolving '{clean_domain}': {err}") from err
+
+
 def is_valid_hostname(hostname: str) -> bool:
-    """
-    Validates if a target string adheres to RFC 1123 DNS hostname rules.
-    """
+    """Validates if a target string adheres to RFC 1123 DNS hostname rules."""
     if not hostname or not isinstance(hostname, str):
         return False
 
@@ -74,7 +142,6 @@ def is_valid_hostname(hostname: str) -> bool:
     if len(cleaned) < 1 or len(cleaned) > 253:
         return False
 
-    # Regex for standard domain names and hostnames (including localhost)
     allowed = re.compile(r"^(?!-)[A-Z\d-]{1,63}(?<!-)$", re.IGNORECASE)
     return all(allowed.match(label) for label in cleaned.split("."))
 
@@ -101,18 +168,18 @@ def resolve_target(target: str) -> Tuple[str, str]:
     if is_valid_ipv4(cleaned):
         return cleaned, cleaned
 
-    # 2. Hostname resolution fallback
-    if is_valid_hostname(cleaned):
-        try:
-            resolved_ip = socket.gethostbyname(cleaned)
-            return cleaned, resolved_ip
-        except socket.gaierror as err:
-            raise ValueError(f"Unable to resolve domain/hostname '{cleaned}': {err}")
+    # 2. Domain / Hostname resolution
+    resolved_ip = resolve_domain(cleaned)
+    if resolved_ip:
+        return cleaned, resolved_ip
 
-    raise ValueError(f"Invalid target '{cleaned}': Must be a valid IPv4 address or resolvable hostname.")
+    raise ValueError(
+        f"Unable to resolve target '{cleaned}': Target is not a valid IPv4 address and domain does not exist."
+    )
 
 
 if __name__ == "__main__":
-    test_ips = ["127.0.0.1", "192.168.1.1", "256.0.0.1", "google.com", "::1", "", "10.0.0.255"]
-    for ip in test_ips:
-        print(f"Target: {ip:<15} -> Valid IPv4: {is_valid_ipv4(ip)}")
+    domains_to_test = ["localhost", "example.com", "nonexistent-domain-404-xyz.com"]
+    for d in domains_to_test:
+        ip = resolve_domain(d)
+        print(f"Domain: {d:<35} -> Resolved IPv4: {ip}")

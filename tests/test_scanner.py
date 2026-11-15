@@ -1,6 +1,7 @@
 """Unit tests for NetPulse core logic and helper utilities."""
 
 import os
+import socket
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -172,6 +173,29 @@ class TestValidators(unittest.TestCase):
         self.assertFalse(is_valid_ipv4("::1"))
         self.assertFalse(is_valid_ipv4(""))
         self.assertFalse(is_valid_ipv4(None))
+
+    @patch("socket.gethostbyname", return_value="93.184.216.34")
+    def test_resolve_domain_success(self, mock_dns):
+        from utils.validators import resolve_domain, resolve_domain_to_ipv4
+        self.assertEqual(resolve_domain("example.com"), "93.184.216.34")
+        self.assertEqual(resolve_domain("https://example.com/"), "93.184.216.34")
+        self.assertEqual(resolve_domain_to_ipv4("example.com"), "93.184.216.34")
+
+    @patch("socket.gethostbyname", side_effect=socket.gaierror(11001, "getaddrinfo failed"))
+    def test_resolve_nonexistent_domain(self, mock_dns):
+        from utils.validators import resolve_domain, resolve_domain_to_ipv4
+        # Graceful return None
+        self.assertIsNone(resolve_domain("this-domain-definitely-does-not-exist.test"))
+        # Descriptive ValueError
+        with self.assertRaises(ValueError) as ctx:
+            resolve_domain_to_ipv4("this-domain-definitely-does-not-exist.test")
+        self.assertIn("Domain does not exist", str(ctx.exception))
+
+    def test_resolve_empty_domain(self):
+        from utils.validators import resolve_domain, resolve_domain_to_ipv4
+        self.assertIsNone(resolve_domain(""))
+        with self.assertRaises(ValueError):
+            resolve_domain_to_ipv4("")
 
 
 if __name__ == "__main__":
