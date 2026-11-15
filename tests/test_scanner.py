@@ -82,6 +82,38 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(result["state"], "OPEN")
         self.assertEqual(result["service"], COMMON_PORTS.get(80))
 
+    @patch("socket.socket")
+    def test_scan_port_standalone_open(self, mock_socket_cls):
+        from core.scanner import scan_port
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 0
+        mock_socket_cls.return_value = mock_sock
+
+        self.assertTrue(scan_port("127.0.0.1", 443, timeout=1.0))
+        mock_sock.connect_ex.assert_called_with(("127.0.0.1", 443))
+        mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_scan_port_standalone_closed(self, mock_socket_cls):
+        from core.scanner import scan_port
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 111  # ECONNREFUSED
+        mock_socket_cls.return_value = mock_sock
+
+        self.assertFalse(scan_port("127.0.0.1", 9999, timeout=1.0))
+        mock_sock.connect_ex.assert_called_with(("127.0.0.1", 9999))
+        mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_scan_port_standalone_exception(self, mock_socket_cls):
+        from core.scanner import scan_port
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.side_effect = socket.timeout("timed out")
+        mock_socket_cls.return_value = mock_sock
+
+        self.assertFalse(scan_port("192.168.1.1", 80, timeout=0.5))
+        mock_sock.close.assert_called_once()
+
 
 class TestLogger(unittest.TestCase):
     """Tests for utils/logger.py."""

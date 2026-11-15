@@ -1,4 +1,6 @@
-"""PortScanner engine implementation using ThreadPoolExecutor."""
+"""
+PortScanner engine implementation using socket connect_ex and ThreadPoolExecutor.
+"""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import socket
@@ -7,8 +9,40 @@ from typing import Callable, Dict, List, Optional
 from .constants import COMMON_PORTS, DEFAULT_TIMEOUT, DEFAULT_THREADS
 
 
+def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> bool:
+    """
+    Checks if a single TCP port is open on a target IP address.
+
+    Uses socket.AF_INET for IPv4 and socket.SOCK_STREAM for TCP.
+    Calls connect_ex(), which returns 0 if the connection succeeded (port open),
+    or an errno error code if closed / filtered.
+
+    Args:
+        ip: Target IPv4 address or hostname string.
+        port: TCP port number (1-65535).
+        timeout: Socket connection timeout in seconds (default: 1.5s).
+
+    Returns:
+        True if the port is open (connect_ex returns 0), False otherwise.
+
+    Examples:
+        >>> scan_port("127.0.0.1", 80, timeout=1.0)
+        False
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+
+    try:
+        status = sock.connect_ex((ip, port))
+        return status == 0
+    except (socket.timeout, socket.error, OSError):
+        return False
+    finally:
+        sock.close()
+
+
 class PortScanner:
-    """Multi-threaded TCP Port Scanner."""
+    """Multi-threaded TCP Port Scanner Engine."""
 
     def __init__(
         self,
@@ -25,45 +59,45 @@ class PortScanner:
         """Resolve hostname to IPv4 address."""
         try:
             return socket.gethostbyname(target)
-        except socket.gaierror as e:
-            raise ValueError(f"Unable to resolve host '{target}': {e}")
+        except socket.gaierror as err:
+            raise ValueError(f"Unable to resolve host '{target}': {err}") from err
 
     def scan_port(self, port: int, grab_banner: bool = False) -> Optional[Dict]:
-        """Scan an individual TCP port. Returns dict if open, None if closed."""
-        result = None
+        """
+        Scans an individual TCP port on the scanner target.
+
+        Returns a dictionary if the port is open, or None if closed.
+        """
+        is_open = scan_port(self.target_ip, port, self.timeout)
+        if not is_open:
+            return None
+
+        service = COMMON_PORTS.get(port, "Unknown")
+        banner = ""
+        if grab_banner:
+            banner = self._grab_banner(port)
+
+        return {
+            "port": port,
+            "state": "OPEN",
+            "service": service,
+            "banner": banner,
+        }
+
+    def _grab_banner(self, port: int) -> str:
+        """Attempt to grab a service banner from an open port."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(self.timeout)
-
         try:
-            status = sock.connect_ex((self.target_ip, port))
-            if status == 0:
-                service = COMMON_PORTS.get(port, "Unknown")
-                banner = ""
-                if grab_banner:
-                    banner = self._grab_banner(sock)
-                result = {
-                    "port": port,
-                    "state": "OPEN",
-                    "service": service,
-                    "banner": banner,
-                }
-        except socket.error:
-            pass
+            if sock.connect_ex((self.target_ip, port)) == 0:
+                sock.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
+                banner = sock.recv(1024).decode("utf-8", errors="ignore").strip()
+                return banner.splitlines()[0] if banner else ""
+            return ""
+        except (socket.timeout, socket.error, OSError):
+            return ""
         finally:
             sock.close()
-
-        return result
-
-    def _grab_banner(self, sock: socket.socket) -> str:
-        """Attempt to grab a service banner from an open socket."""
-        try:
-            # Send standard probe byte if needed or just listen
-            sock.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
-            banner = sock.recv(1024).decode("utf-8", errors="ignore").strip()
-            # Return first line or truncated banner
-            return banner.splitlines()[0] if banner else ""
-        except (socket.timeout, socket.error):
-            return ""
 
     def scan_ports(
         self,
@@ -71,7 +105,17 @@ class PortScanner:
         grab_banner: bool = False,
         on_port_scanned: Optional[Callable[[Dict], None]] = None,
     ) -> List[Dict]:
-        """Scan a list of ports concurrently using thread pool."""
+        """
+        Scans a list of ports concurrently using ThreadPoolExecutor.
+
+        Args:
+            ports: List of port integers to scan.
+            grab_banner: Flag to attempt service banner grabbing.
+            on_port_scanned: Optional callback function triggered when an open port is discovered.
+
+        Returns:
+            Sorted list of open port detail dictionaries.
+        """
         open_ports: List[Dict] = []
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -87,6 +131,6 @@ class PortScanner:
                     if on_port_scanned:
                         on_port_scanned(res)
 
-        # Sort results by port number
+        # Sort results numerically by port number
         open_ports.sort(key=lambda x: x["port"])
         return open_ports
