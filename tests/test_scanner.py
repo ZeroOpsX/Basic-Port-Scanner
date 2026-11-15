@@ -105,13 +105,44 @@ class TestScanner(unittest.TestCase):
         mock_sock.close.assert_called_once()
 
     @patch("socket.socket")
-    def test_scan_port_standalone_exception(self, mock_socket_cls):
+    def test_scan_port_handles_timeout(self, mock_socket_cls):
         from core.scanner import scan_port
         mock_sock = MagicMock()
         mock_sock.connect_ex.side_effect = socket.timeout("timed out")
         mock_socket_cls.return_value = mock_sock
 
         self.assertFalse(scan_port("192.168.1.1", 80, timeout=0.5))
+        mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_scan_port_handles_gaierror(self, mock_socket_cls):
+        from core.scanner import scan_port
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.side_effect = socket.gaierror(11001, "getaddrinfo failed")
+        mock_socket_cls.return_value = mock_sock
+
+        self.assertFalse(scan_port("invalid.host", 80, timeout=0.5))
+        mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_scan_port_handles_socket_error(self, mock_socket_cls):
+        from core.scanner import scan_port
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.side_effect = socket.error("Connection reset by peer")
+        mock_socket_cls.return_value = mock_sock
+
+        self.assertFalse(scan_port("127.0.0.1", 80, timeout=0.5))
+        mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_scan_port_handles_keyboard_interrupt(self, mock_socket_cls):
+        from core.scanner import scan_port
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.side_effect = KeyboardInterrupt()
+        mock_socket_cls.return_value = mock_sock
+
+        # Must not raise KeyboardInterrupt or crash
+        self.assertFalse(scan_port("127.0.0.1", 80, timeout=0.5))
         mock_sock.close.assert_called_once()
 
 

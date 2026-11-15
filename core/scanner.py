@@ -3,10 +3,16 @@ PortScanner engine implementation using socket connect_ex and ThreadPoolExecutor
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 import socket
 from typing import Callable, Dict, List, Optional
 
 from .constants import COMMON_PORTS, DEFAULT_TIMEOUT, DEFAULT_THREADS
+
+try:
+    from utils.logger import logger
+except ImportError:
+    logger = logging.getLogger("NetPulse")
 
 
 def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> bool:
@@ -16,6 +22,12 @@ def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> bool:
     Uses socket.AF_INET for IPv4 and socket.SOCK_STREAM for TCP.
     Calls connect_ex(), which returns 0 if the connection succeeded (port open),
     or an errno error code if closed / filtered.
+
+    Gracefully catches and handles:
+      - socket.timeout: Port filtered or host unresponsive within timeout.
+      - socket.gaierror: Address resolution or hostname lookup failure.
+      - socket.error: Low-level socket, OS, or network communication error.
+      - KeyboardInterrupt: User cancellation via Ctrl+C.
 
     Args:
         ip: Target IPv4 address or hostname string.
@@ -29,16 +41,32 @@ def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> bool:
         >>> scan_port("127.0.0.1", 80, timeout=1.0)
         False
     """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-
+    sock = None
     try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
         status = sock.connect_ex((ip, port))
         return status == 0
-    except (socket.timeout, socket.error, OSError):
+    except socket.timeout:
+        # Port connection timed out (filtered or unresponsive)
+        return False
+    except socket.gaierror as err:
+        # Address resolution / getaddrinfo failure
+        logger.error(f"Address resolution failure for target '{ip}': {err}")
+        return False
+    except socket.error as err:
+        # Low-level network or socket communication error
+        logger.error(f"Socket error on {ip}:{port} - {err}")
+        return False
+    except KeyboardInterrupt:
+        # User interruption (Ctrl+C) handled without crashing
         return False
     finally:
-        sock.close()
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 class PortScanner:
@@ -99,18 +127,23 @@ class PortScanner:
     def _grab_banner(self, port: int, timeout: Optional[float] = None) -> str:
         """Attempt to grab a service banner from an open port."""
         active_timeout = timeout if timeout is not None else self.timeout
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(active_timeout)
+        sock = None
         try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(active_timeout)
             if sock.connect_ex((self.target_ip, port)) == 0:
                 sock.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
                 banner = sock.recv(1024).decode("utf-8", errors="ignore").strip()
                 return banner.splitlines()[0] if banner else ""
             return ""
-        except (socket.timeout, socket.error, OSError):
+        except (socket.timeout, socket.gaierror, socket.error, OSError, KeyboardInterrupt):
             return ""
         finally:
-            sock.close()
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     def scan_ports(
         self,
