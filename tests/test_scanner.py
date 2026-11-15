@@ -273,5 +273,29 @@ class TestValidators(unittest.TestCase):
             resolve_domain_to_ipv4("")
 
 
+class TestSignalHandler(unittest.TestCase):
+    """Tests for signal_handler in main.py."""
+
+    def test_signal_handler_prints_partial_and_exits(self):
+        import signal
+        from main import scan_context, signal_handler
+
+        scan_context["start_time"] = 100.0
+        scan_context["scanned_count"] = 5
+        scan_context["total_ports"] = 100
+        scan_context["target"] = "localhost"
+        scan_context["target_ip"] = "127.0.0.1"
+        scan_context["open_ports"] = [
+            {"port": 80, "state": "OPEN", "service": "HTTP"}
+        ]
+        scan_context["interrupted"] = False
+
+        with self.assertRaises(SystemExit) as cm:
+            signal_handler(signal.SIGINT, None)
+
+        self.assertEqual(cm.exception.code, 130)
+        self.assertTrue(scan_context["interrupted"])
+
+
 if __name__ == "__main__":
     unittest.main()
