@@ -1,5 +1,30 @@
-# Core & CLI formatting dependencies
-colorama>=0.4.6
+# ==============================================================================
+# NetPulse - Advanced Python Port Scanner Dependencies
+# ==============================================================================
 
-# Testing
-pytest>=8.0.0
+# ------------------------------------------------------------------------------
+# Terminal UI, Formatting & CLI Presentation
+# ------------------------------------------------------------------------------
+colorama>=0.4.6           # Cross-platform ANSI terminal coloring
+rich>=13.7.0              # Rich tables, live spinners, progress bars & panels
+
+# ------------------------------------------------------------------------------
+# Packet Crafting, Raw Sockets & Network Probing
+# ------------------------------------------------------------------------------
+scapy>=2.5.0              # SYN/ACK, UDP, ICMP packet crafting & raw socket scanning
+
+# ------------------------------------------------------------------------------
+# HTTP Service Fingerprinting & Banner Grabbing
+# ------------------------------------------------------------------------------
+requests>=2.31.0          # HTTP/HTTPS header extraction, probing & web banner inspection
+
+# ------------------------------------------------------------------------------
+# Network Addressing & IP Handling
+# ------------------------------------------------------------------------------
+netaddr>=1.2.0            # IP range, CIDR notation & subnet parsing
+
+# ------------------------------------------------------------------------------
+# Testing, Mocking & Code Quality
+# ------------------------------------------------------------------------------
+pytest>=8.0.0             # Testing framework
+pytest-mock>=3.12.0       # Mocking sockets, requests & packet streams
