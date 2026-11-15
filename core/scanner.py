@@ -1,11 +1,13 @@
 """
-PortScanner engine implementation using ThreadPoolExecutor for multi-threaded scanning.
+PortScanner engine implementation using queue.Queue and ThreadPoolExecutor.
+Provides efficient port distribution across worker threads for large scans up to 65,535 ports.
 Classifies port states into OPEN, CLOSED (RST/refusal), and FILTERED (timeout).
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import errno
 import logging
+import queue
 import socket
 import threading
 from typing import Callable, Dict, List, Optional
@@ -111,9 +113,7 @@ def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> PortStatu
 
 
 def grab_banner(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> str:
-    """
-    Attempts to retrieve a service banner from an open TCP port.
-    """
+    """Attempts to retrieve a service banner from an open TCP port."""
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -133,6 +133,16 @@ def grab_banner(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> str:
                 pass
 
 
+def create_port_queue(ports: List[int]) -> queue.Queue:
+    """
+    Populates and returns a thread-safe FIFO queue.Queue with port numbers.
+    """
+    port_queue: queue.Queue = queue.Queue()
+    for port in ports:
+        port_queue.put(port)
+    return port_queue
+
+
 def scan_ports_concurrent(
     ip: str,
     ports: List[int],
@@ -143,14 +153,15 @@ def scan_ports_concurrent(
     on_port_scanned: Optional[Callable[[Dict], None]] = None,
 ) -> List[Dict]:
     """
-    Multi-threaded port scanning loop using concurrent.futures.ThreadPoolExecutor.
+    High-performance multi-threaded port scanner powered by queue.Queue and ThreadPoolExecutor.
 
-    Distributes port checks across a worker pool, yielding real-time callback
-    events and returning a sorted list of discovered open ports.
+    Distributes all ports (including full 1-65535 ranges) through a thread-safe queue.Queue.
+    Instead of instantiating 65,535 Future objects in memory, a pool of persistent worker
+    threads pulls ports from the queue until exhausted.
 
     Args:
         ip: Target IPv4 address or hostname.
-        ports: List of port integers to scan.
+        ports: List of port integers to scan (can scale up to all 65,535 ports).
         timeout: Socket timeout per port in seconds.
         max_workers: Concurrency thread pool size (default: 100).
         grab_banners: Whether to attempt service banner grabbing on open ports.
@@ -163,49 +174,62 @@ def scan_ports_concurrent(
     if not ports:
         return []
 
+    # 1. Initialize FIFO port queue
+    port_queue = create_port_queue(ports)
     workers = max(1, min(max_workers, len(ports)))
+
     results: List[Dict] = []
     results_lock = threading.Lock()
 
-    def _worker(port: int) -> None:
-        state = scan_port(ip, port, timeout=timeout)
-        if not include_closed and state != PortStatus.OPEN:
-            return
+    def _queue_worker() -> None:
+        """Worker thread task: pulls ports from queue.Queue until empty."""
+        while True:
+            try:
+                port = port_queue.get_nowait()
+            except queue.Empty:
+                break
 
-        service = COMMON_PORTS.get(port, "Unknown")
-        banner = ""
-        if state == PortStatus.OPEN and grab_banners:
-            banner = grab_banner(ip, port, timeout=timeout)
+            try:
+                state = scan_port(ip, port, timeout=timeout)
+                if include_closed or state == PortStatus.OPEN:
+                    service = COMMON_PORTS.get(port, "Unknown")
+                    banner = ""
+                    if state == PortStatus.OPEN and grab_banners:
+                        banner = grab_banner(ip, port, timeout=timeout)
 
-        record = {
-            "port": port,
-            "state": str(state),
-            "service": service,
-            "banner": banner,
-        }
+                    record = {
+                        "port": port,
+                        "state": str(state),
+                        "service": service,
+                        "banner": banner,
+                    }
 
-        # Thread-safe synchronization: acquire lock before appending to shared list
-        with results_lock:
-            results.append(record)
-            if on_port_scanned:
-                on_port_scanned(record)
+                    # Thread-safe synchronization using threading.Lock()
+                    with results_lock:
+                        results.append(record)
+                        if on_port_scanned:
+                            on_port_scanned(record)
+            except Exception as err:
+                logger.error(f"Error scanning port {port}: {err}")
+            finally:
+                port_queue.task_done()
 
+    # 2. Spawn pool of persistent workers pulling from the queue
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_port = {executor.submit(_worker, port): port for port in ports}
-
-        for future in as_completed(future_to_port):
+        futures = [executor.submit(_queue_worker) for _ in range(workers)]
+        for future in as_completed(futures):
             try:
                 future.result()
             except Exception as err:
-                logger.error(f"Error scanning port {future_to_port[future]}: {err}")
+                logger.error(f"Worker thread error: {err}")
 
-    # Sort results numerically by port number
+    # 3. Sort results numerically by port number
     results.sort(key=lambda x: x["port"])
     return results
 
 
 class PortScanner:
-    """Multi-threaded TCP Port Scanner Engine leveraging ThreadPoolExecutor."""
+    """Multi-threaded TCP Port Scanner Engine leveraging queue.Queue and ThreadPoolExecutor."""
 
     def __init__(
         self,
@@ -233,9 +257,7 @@ class PortScanner:
         timeout: Optional[float] = None,
         include_closed: bool = False,
     ) -> Optional[Dict]:
-        """
-        Scans an individual TCP port on the scanner target.
-        """
+        """Scans an individual TCP port on the scanner target."""
         active_timeout = timeout if timeout is not None else self.timeout
         state = scan_port(self.target_ip, port, timeout=active_timeout)
 
@@ -263,7 +285,7 @@ class PortScanner:
         include_closed: bool = False,
     ) -> List[Dict]:
         """
-        Multi-threaded scanning loop using ThreadPoolExecutor.
+        Multi-threaded scanning loop using queue.Queue and ThreadPoolExecutor.
         """
         active_timeout = timeout if timeout is not None else self.timeout
         return scan_ports_concurrent(

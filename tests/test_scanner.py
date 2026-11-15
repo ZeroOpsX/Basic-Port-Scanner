@@ -188,6 +188,16 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(len(results), 50)
         self.assertEqual([r["port"] for r in results], ports)
 
+    def test_create_port_queue(self):
+        from core.scanner import create_port_queue
+        ports = [21, 22, 80, 443]
+        q = create_port_queue(ports)
+        self.assertEqual(q.qsize(), 4)
+        extracted = []
+        while not q.empty():
+            extracted.append(q.get_nowait())
+        self.assertEqual(extracted, ports)
+
     @patch("socket.socket")
     def test_scan_port_handles_gaierror(self, mock_socket_cls):
         from core.scanner import scan_port
