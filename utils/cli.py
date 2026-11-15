@@ -18,7 +18,7 @@ except ImportError:
     COMMON_PORTS_LIST = [20, 21, 22, 23, 25, 53, 80, 110, 143, 443, 3306, 3389, 8080]
 
 CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | TARGET) [-p PORTS | --common]
-                [-w WORKERS] [--timeout TIMEOUT] [-b] [-o {json,txt}] [-q] [-v]"""
+                [-Pn] [-w WORKERS] [--timeout TIMEOUT] [-b] [-o {json,txt}] [-q] [-v]"""
 
 CUSTOM_DESCRIPTION = f"""
 ================================================================================
@@ -44,6 +44,9 @@ Examples:
 
   # Scan top common ports and export results:
   python main.py --target 127.0.0.1 --common -o json
+
+  # Skip host alive check and force port scan (like Nmap -Pn):
+  python main.py -t 192.168.1.1 -p 80,443 -Pn
 """
 
 
@@ -151,6 +154,16 @@ def create_parser() -> argparse.ArgumentParser:
         "--common",
         action="store_true",
         help="Scan top standard common ports only (HTTP, SSH, MySQL, etc.)",
+    )
+
+    # Host Discovery Options
+    discovery_group = parser.add_argument_group("Host Discovery Options")
+    discovery_group.add_argument(
+        "-Pn",
+        "--Pn",
+        dest="Pn",
+        action="store_true",
+        help="Treat target as online -- skip ICMP/TCP host alive check and force scan",
     )
 
     # Performance & Timing

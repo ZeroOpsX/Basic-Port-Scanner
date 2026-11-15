@@ -135,14 +135,17 @@ def main():
 
     ports = args.ports_list
 
-    # Check host availability prior to port scanning
-    logger.info(f"Checking host availability on {canonical_target} ({target_ip})...")
-    if is_host_online(target_ip, timeout=args.timeout):
-        logger.info(f"Target '{canonical_target}' is online and responsive.")
+    # Check host availability prior to port scanning unless -Pn is specified
+    if args.Pn:
+        logger.info(f"Host discovery skipped (-Pn). Forcing scan on '{canonical_target}'.")
     else:
-        logger.warning(
-            f"Target '{canonical_target}' did not respond to ICMP/TCP ping (host may be down or firewalling probes)."
-        )
+        logger.info(f"Checking host availability on {canonical_target} ({target_ip})...")
+        if is_host_online(target_ip, timeout=args.timeout):
+            logger.info(f"Target '{canonical_target}' is online and responsive.")
+        else:
+            logger.warning(
+                f"Target '{canonical_target}' did not respond to ICMP/TCP ping (host may be down or firewalling probes)."
+            )
 
     # Record exact start time
     start_timestamp = time.time()

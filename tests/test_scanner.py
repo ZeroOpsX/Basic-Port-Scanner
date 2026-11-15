@@ -229,6 +229,17 @@ class TestCLI(unittest.TestCase):
                 parse_arguments(["-t", "127.0.0.1", "--timeout", "-1.0"])
         self.assertEqual(cm.exception.code, 2)
 
+    def test_cli_pn_flag(self):
+        from utils.cli import parse_arguments
+        args_short = parse_arguments(["-t", "127.0.0.1", "-Pn"])
+        self.assertTrue(args_short.Pn)
+
+        args_long = parse_arguments(["-t", "127.0.0.1", "--Pn"])
+        self.assertTrue(args_long.Pn)
+
+        args_default = parse_arguments(["-t", "127.0.0.1"])
+        self.assertFalse(args_default.Pn)
+
 
 class TestValidators(unittest.TestCase):
     """Tests for utils/validators.py using ipaddress module."""
