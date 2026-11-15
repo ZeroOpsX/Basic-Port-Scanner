@@ -62,20 +62,32 @@ class PortScanner:
         except socket.gaierror as err:
             raise ValueError(f"Unable to resolve host '{target}': {err}") from err
 
-    def scan_port(self, port: int, grab_banner: bool = False) -> Optional[Dict]:
+    def scan_port(
+        self,
+        port: int,
+        grab_banner: bool = False,
+        timeout: Optional[float] = None,
+    ) -> Optional[Dict]:
         """
         Scans an individual TCP port on the scanner target.
 
-        Returns a dictionary if the port is open, or None if closed.
+        Args:
+            port: Port number to scan.
+            grab_banner: Whether to attempt banner grabbing.
+            timeout: Optional per-call timeout override; defaults to self.timeout.
+
+        Returns:
+            Dictionary with port info if open, or None if closed.
         """
-        is_open = scan_port(self.target_ip, port, self.timeout)
+        active_timeout = timeout if timeout is not None else self.timeout
+        is_open = scan_port(self.target_ip, port, timeout=active_timeout)
         if not is_open:
             return None
 
         service = COMMON_PORTS.get(port, "Unknown")
         banner = ""
         if grab_banner:
-            banner = self._grab_banner(port)
+            banner = self._grab_banner(port, timeout=active_timeout)
 
         return {
             "port": port,
@@ -84,10 +96,11 @@ class PortScanner:
             "banner": banner,
         }
 
-    def _grab_banner(self, port: int) -> str:
+    def _grab_banner(self, port: int, timeout: Optional[float] = None) -> str:
         """Attempt to grab a service banner from an open port."""
+        active_timeout = timeout if timeout is not None else self.timeout
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(self.timeout)
+        sock.settimeout(active_timeout)
         try:
             if sock.connect_ex((self.target_ip, port)) == 0:
                 sock.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
@@ -103,6 +116,7 @@ class PortScanner:
         self,
         ports: List[int],
         grab_banner: bool = False,
+        timeout: Optional[float] = None,
         on_port_scanned: Optional[Callable[[Dict], None]] = None,
     ) -> List[Dict]:
         """
@@ -111,16 +125,18 @@ class PortScanner:
         Args:
             ports: List of port integers to scan.
             grab_banner: Flag to attempt service banner grabbing.
+            timeout: Optional dynamic timeout override for each port scan.
             on_port_scanned: Optional callback function triggered when an open port is discovered.
 
         Returns:
             Sorted list of open port detail dictionaries.
         """
+        active_timeout = timeout if timeout is not None else self.timeout
         open_ports: List[Dict] = []
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_port = {
-                executor.submit(self.scan_port, port, grab_banner): port
+                executor.submit(self.scan_port, port, grab_banner, active_timeout): port
                 for port in ports
             }
 

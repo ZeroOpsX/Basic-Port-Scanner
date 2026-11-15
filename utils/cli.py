@@ -232,6 +232,14 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
 
     parsed_args.target = target
 
+    # Validate timeout argument
+    if parsed_args.timeout <= 0:
+        print(
+            f"[!] Error: Timeout must be a positive float greater than 0 (received: {parsed_args.timeout}).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     # Parse port specifications into a list of integers
     if parsed_args.common:
         parsed_args.ports_list = COMMON_PORTS_LIST

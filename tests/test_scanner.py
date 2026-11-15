@@ -186,6 +186,18 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(args.ports_list[0], 1)
         self.assertEqual(args.ports_list[-1], 1000)
 
+    def test_cli_timeout_argument(self):
+        from utils.cli import parse_arguments
+        args = parse_arguments(["-t", "127.0.0.1", "--timeout", "3.2"])
+        self.assertAlmostEqual(args.timeout, 3.2)
+
+    def test_cli_negative_timeout_exits(self):
+        from utils.cli import parse_arguments
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.stderr"):
+                parse_arguments(["-t", "127.0.0.1", "--timeout", "-1.0"])
+        self.assertEqual(cm.exception.code, 2)
+
 
 class TestValidators(unittest.TestCase):
     """Tests for utils/validators.py using ipaddress module."""
