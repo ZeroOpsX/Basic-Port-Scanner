@@ -154,5 +154,25 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(args.ports_list[-1], 1000)
 
 
+class TestValidators(unittest.TestCase):
+    """Tests for utils/validators.py using ipaddress module."""
+
+    def test_valid_ipv4(self):
+        from utils.validators import is_valid_ipv4
+        self.assertTrue(is_valid_ipv4("127.0.0.1"))
+        self.assertTrue(is_valid_ipv4("192.168.1.254"))
+        self.assertTrue(is_valid_ipv4("10.0.0.1"))
+        self.assertTrue(is_valid_ipv4(" 8.8.8.8 "))
+
+    def test_invalid_ipv4(self):
+        from utils.validators import is_valid_ipv4
+        self.assertFalse(is_valid_ipv4("256.1.1.1"))
+        self.assertFalse(is_valid_ipv4("192.168.1"))
+        self.assertFalse(is_valid_ipv4("example.com"))
+        self.assertFalse(is_valid_ipv4("::1"))
+        self.assertFalse(is_valid_ipv4(""))
+        self.assertFalse(is_valid_ipv4(None))
+
+
 if __name__ == "__main__":
     unittest.main()
