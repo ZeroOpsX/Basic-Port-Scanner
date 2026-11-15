@@ -12,12 +12,15 @@ from .config import (
     VERSION,
 )
 from .helpers import export_results, parse_port_range, validate_target
+from .logger import logger, setup_logger
 
 __all__ = [
     "print_banner",
     "parse_port_range",
     "validate_target",
     "export_results",
+    "logger",
+    "setup_logger",
     "TOOL_NAME",
     "VERSION",
     "AUTHOR",

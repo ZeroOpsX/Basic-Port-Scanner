@@ -82,5 +82,28 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(result["service"], COMMON_PORTS.get(80))
 
 
+class TestLogger(unittest.TestCase):
+    """Tests for utils/logger.py."""
+
+    def test_logger_file_and_console(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_log_file = os.path.join(tmp_dir, "test_scanner.log")
+            from utils.logger import setup_logger
+            test_logger = setup_logger(name="TestNetPulse", log_file=test_log_file)
+            test_logger.info("Informational message")
+            test_logger.error("Critical connection failure")
+
+            # Close handlers on Windows so the temp file can be cleaned up
+            for handler in test_logger.handlers[:]:
+                handler.close()
+                test_logger.removeHandler(handler)
+
+            self.assertTrue(os.path.exists(test_log_file))
+            with open(test_log_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("Critical connection failure", content)
+            self.assertNotIn("Informational message", content)
+
+
 if __name__ == "__main__":
     unittest.main()
