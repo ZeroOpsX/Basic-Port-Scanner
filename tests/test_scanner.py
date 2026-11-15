@@ -170,6 +170,25 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(sorted(discovered), [80, 443])
 
     @patch("socket.socket")
+    def test_concurrent_append_thread_safety(self, mock_socket_cls):
+        from core.scanner import scan_ports_concurrent
+        mock_sock = MagicMock()
+        # All 50 ports open
+        mock_sock.connect_ex.return_value = 0
+        mock_socket_cls.return_value = mock_sock
+
+        ports = list(range(1000, 1050))
+        results = scan_ports_concurrent(
+            ip="127.0.0.1",
+            ports=ports,
+            timeout=0.1,
+            max_workers=20,
+        )
+        # All 50 ports should be appended safely without omission or race condition
+        self.assertEqual(len(results), 50)
+        self.assertEqual([r["port"] for r in results], ports)
+
+    @patch("socket.socket")
     def test_scan_port_handles_gaierror(self, mock_socket_cls):
         from core.scanner import scan_port
         mock_sock = MagicMock()

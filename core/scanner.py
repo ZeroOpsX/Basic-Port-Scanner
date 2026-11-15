@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import errno
 import logging
 import socket
+import threading
 from typing import Callable, Dict, List, Optional
 
 from .constants import COMMON_PORTS, DEFAULT_THREADS, DEFAULT_TIMEOUT
@@ -164,11 +165,12 @@ def scan_ports_concurrent(
 
     workers = max(1, min(max_workers, len(ports)))
     results: List[Dict] = []
+    results_lock = threading.Lock()
 
-    def _worker(port: int) -> Optional[Dict]:
+    def _worker(port: int) -> None:
         state = scan_port(ip, port, timeout=timeout)
         if not include_closed and state != PortStatus.OPEN:
-            return None
+            return
 
         service = COMMON_PORTS.get(port, "Unknown")
         banner = ""
@@ -181,18 +183,19 @@ def scan_ports_concurrent(
             "service": service,
             "banner": banner,
         }
-        return record
+
+        # Thread-safe synchronization: acquire lock before appending to shared list
+        with results_lock:
+            results.append(record)
+            if on_port_scanned:
+                on_port_scanned(record)
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_port = {executor.submit(_worker, port): port for port in ports}
 
         for future in as_completed(future_to_port):
             try:
-                res = future.result()
-                if res:
-                    results.append(res)
-                    if on_port_scanned:
-                        on_port_scanned(res)
+                future.result()
             except Exception as err:
                 logger.error(f"Error scanning port {future_to_port[future]}: {err}")
 
@@ -214,6 +217,7 @@ class PortScanner:
         self.timeout = timeout
         self.max_workers = max_workers
         self.target_ip = self._resolve_target(target)
+        self.lock = threading.Lock()
 
     def _resolve_target(self, target: str) -> str:
         """Resolve hostname to IPv4 address."""
