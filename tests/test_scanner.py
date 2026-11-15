@@ -84,35 +84,70 @@ class TestScanner(unittest.TestCase):
 
     @patch("socket.socket")
     def test_scan_port_standalone_open(self, mock_socket_cls):
-        from core.scanner import scan_port
+        from core.scanner import PortStatus, scan_port
         mock_sock = MagicMock()
         mock_sock.connect_ex.return_value = 0
         mock_socket_cls.return_value = mock_sock
 
-        self.assertTrue(scan_port("127.0.0.1", 443, timeout=1.0))
+        status = scan_port("127.0.0.1", 443, timeout=1.0)
+        self.assertTrue(status)
+        self.assertEqual(status, PortStatus.OPEN)
+        self.assertEqual(status, "OPEN")
         mock_sock.connect_ex.assert_called_with(("127.0.0.1", 443))
         mock_sock.close.assert_called_once()
 
     @patch("socket.socket")
     def test_scan_port_standalone_closed(self, mock_socket_cls):
-        from core.scanner import scan_port
+        from core.scanner import PortStatus, scan_port
         mock_sock = MagicMock()
         mock_sock.connect_ex.return_value = 111  # ECONNREFUSED
         mock_socket_cls.return_value = mock_sock
 
-        self.assertFalse(scan_port("127.0.0.1", 9999, timeout=1.0))
+        status = scan_port("127.0.0.1", 9999, timeout=1.0)
+        self.assertFalse(status)
+        self.assertEqual(status, PortStatus.CLOSED)
+        self.assertEqual(status, "CLOSED")
         mock_sock.connect_ex.assert_called_with(("127.0.0.1", 9999))
         mock_sock.close.assert_called_once()
 
     @patch("socket.socket")
     def test_scan_port_handles_timeout(self, mock_socket_cls):
-        from core.scanner import scan_port
+        from core.scanner import PortStatus, scan_port
         mock_sock = MagicMock()
         mock_sock.connect_ex.side_effect = socket.timeout("timed out")
         mock_socket_cls.return_value = mock_sock
 
-        self.assertFalse(scan_port("192.168.1.1", 80, timeout=0.5))
+        status = scan_port("192.168.1.1", 80, timeout=0.5)
+        self.assertFalse(status)
+        self.assertEqual(status, PortStatus.FILTERED)
+        self.assertEqual(status, "FILTERED")
         mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_scan_port_winsock_codes(self, mock_socket_cls):
+        from core.scanner import PortStatus, scan_port
+        mock_sock = MagicMock()
+        mock_socket_cls.return_value = mock_sock
+
+        # WSAECONNREFUSED (10061) -> CLOSED
+        mock_sock.connect_ex.return_value = 10061
+        self.assertEqual(scan_port("127.0.0.1", 21), PortStatus.CLOSED)
+
+        # WSAETIMEDOUT (10060) -> FILTERED
+        mock_sock.connect_ex.return_value = 10060
+        self.assertEqual(scan_port("127.0.0.1", 23), PortStatus.FILTERED)
+
+    @patch("socket.socket")
+    @patch("socket.gethostbyname", return_value="127.0.0.1")
+    def test_port_scanner_include_closed(self, mock_resolve, mock_socket_cls):
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 111  # ECONNREFUSED
+        mock_socket_cls.return_value = mock_sock
+
+        scanner = PortScanner(target="127.0.0.1")
+        result = scanner.scan_port(80, include_closed=True)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["state"], "CLOSED")
 
     @patch("socket.socket")
     def test_scan_port_handles_gaierror(self, mock_socket_cls):

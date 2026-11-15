@@ -1,8 +1,10 @@
 """
 PortScanner engine implementation using socket connect_ex and ThreadPoolExecutor.
+Classifies port states into OPEN, CLOSED (RST/refusal), and FILTERED (timeout).
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import errno
 import logging
 import socket
 from typing import Callable, Dict, List, Optional
@@ -15,19 +17,53 @@ except ImportError:
     logger = logging.getLogger("NetPulse")
 
 
-def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> bool:
+class PortStatus(str):
     """
-    Checks if a single TCP port is open on a target IP address.
+    Port state classification representation.
+    Inherits from str so equality checks like `state == 'OPEN'` evaluate normally,
+    while `bool(PortStatus.OPEN)` is True and `bool(PortStatus.CLOSED)` is False.
+    """
+    def __bool__(self) -> bool:
+        return self == "OPEN"
 
-    Uses socket.AF_INET for IPv4 and socket.SOCK_STREAM for TCP.
-    Calls connect_ex(), which returns 0 if the connection succeeded (port open),
-    or an errno error code if closed / filtered.
 
-    Gracefully catches and handles:
-      - socket.timeout: Port filtered or host unresponsive within timeout.
-      - socket.gaierror: Address resolution or hostname lookup failure.
-      - socket.error: Low-level socket, OS, or network communication error.
-      - KeyboardInterrupt: User cancellation via Ctrl+C.
+PortStatus.OPEN = PortStatus("OPEN")
+PortStatus.CLOSED = PortStatus("CLOSED")
+PortStatus.FILTERED = PortStatus("FILTERED")
+
+PORT_OPEN = PortStatus.OPEN
+PORT_CLOSED = PortStatus.CLOSED
+PORT_FILTERED = PortStatus.FILTERED
+
+# Errno definitions for active connection refusal (RST packet / immediate refusal)
+CLOSED_ERRNOS = {
+    errno.ECONNREFUSED,  # 111 on Linux
+}
+if hasattr(errno, "ECONNRESET"):
+    CLOSED_ERRNOS.add(errno.ECONNRESET)
+# Windows Winsock error codes (WSAECONNREFUSED=10061, WSAECONNRESET=10054)
+CLOSED_ERRNOS.update({10061, 10054})
+
+# Errno definitions for dropped packets and connection timeouts (Filtered)
+FILTERED_ERRNOS = set()
+if hasattr(errno, "ETIMEDOUT"):
+    FILTERED_ERRNOS.add(errno.ETIMEDOUT)
+if hasattr(errno, "EHOSTUNREACH"):
+    FILTERED_ERRNOS.add(errno.EHOSTUNREACH)
+if hasattr(errno, "ENETUNREACH"):
+    FILTERED_ERRNOS.add(errno.ENETUNREACH)
+# Windows Winsock error codes (WSAETIMEDOUT=10060, WSAEHOSTUNREACH=10065, WSAENETUNREACH=10051)
+FILTERED_ERRNOS.update({10060, 10065, 10051})
+
+
+def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> PortStatus:
+    """
+    Checks and classifies a single TCP port on a target IP address.
+
+    Port State Classifications:
+      - 'OPEN': Handshake completed successfully (connect_ex returns 0).
+      - 'CLOSED': Target responded with an active TCP RST or connection refusal (ECONNREFUSED).
+      - 'FILTERED': Probe timed out or dropped by firewall (ETIMEDOUT / socket.timeout).
 
     Args:
         ip: Target IPv4 address or hostname string.
@@ -35,32 +71,40 @@ def scan_port(ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> bool:
         timeout: Socket connection timeout in seconds (default: 1.5s).
 
     Returns:
-        True if the port is open (connect_ex returns 0), False otherwise.
+        PortStatus enum-like string: 'OPEN', 'CLOSED', or 'FILTERED'.
 
     Examples:
         >>> scan_port("127.0.0.1", 80, timeout=1.0)
-        False
+        'CLOSED'
     """
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         status = sock.connect_ex((ip, port))
-        return status == 0
+
+        if status == 0:
+            return PortStatus.OPEN
+        elif status in CLOSED_ERRNOS:
+            return PortStatus.CLOSED
+        elif status in FILTERED_ERRNOS:
+            return PortStatus.FILTERED
+        else:
+            return PortStatus.CLOSED if status == 111 or status == 10061 else PortStatus.FILTERED
+
     except socket.timeout:
-        # Port connection timed out (filtered or unresponsive)
-        return False
+        # No response received before timeout: packet dropped or filtered
+        return PortStatus.FILTERED
     except socket.gaierror as err:
-        # Address resolution / getaddrinfo failure
         logger.error(f"Address resolution failure for target '{ip}': {err}")
-        return False
+        return PortStatus.FILTERED
     except socket.error as err:
-        # Low-level network or socket communication error
-        logger.error(f"Socket error on {ip}:{port} - {err}")
-        return False
+        err_code = getattr(err, "errno", None)
+        if err_code in CLOSED_ERRNOS or "refus" in str(err).lower():
+            return PortStatus.CLOSED
+        return PortStatus.FILTERED
     except KeyboardInterrupt:
-        # User interruption (Ctrl+C) handled without crashing
-        return False
+        return PortStatus.FILTERED
     finally:
         if sock:
             try:
@@ -95,31 +139,34 @@ class PortScanner:
         port: int,
         grab_banner: bool = False,
         timeout: Optional[float] = None,
+        include_closed: bool = False,
     ) -> Optional[Dict]:
         """
-        Scans an individual TCP port on the scanner target.
+        Scans an individual TCP port on the scanner target and classifies its state.
 
         Args:
             port: Port number to scan.
-            grab_banner: Whether to attempt banner grabbing.
+            grab_banner: Whether to attempt banner grabbing on open ports.
             timeout: Optional per-call timeout override; defaults to self.timeout.
+            include_closed: If True, returns result even if port is CLOSED or FILTERED.
 
         Returns:
-            Dictionary with port info if open, or None if closed.
+            Dictionary with port info and classified state ("OPEN", "CLOSED", or "FILTERED").
         """
         active_timeout = timeout if timeout is not None else self.timeout
-        is_open = scan_port(self.target_ip, port, timeout=active_timeout)
-        if not is_open:
+        state = scan_port(self.target_ip, port, timeout=active_timeout)
+
+        if not include_closed and state != PortStatus.OPEN:
             return None
 
         service = COMMON_PORTS.get(port, "Unknown")
         banner = ""
-        if grab_banner:
+        if state == PortStatus.OPEN and grab_banner:
             banner = self._grab_banner(port, timeout=active_timeout)
 
         return {
             "port": port,
-            "state": "OPEN",
+            "state": str(state),
             "service": service,
             "banner": banner,
         }
