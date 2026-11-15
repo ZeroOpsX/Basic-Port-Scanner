@@ -1,0 +1,5 @@
+# Core & CLI formatting dependencies
+colorama>=0.4.6
+
+# Testing
+pytest>=8.0.0
