@@ -11,6 +11,7 @@ import time
 from typing import Any, Dict
 
 from core.constants import COMMON_PORTS
+from core.host_discovery import is_host_online
 from core.scanner import scan_port
 from utils.banner import print_banner
 from utils.cli import parse_arguments
@@ -133,6 +134,15 @@ def main():
         sys.exit(1)
 
     ports = args.ports_list
+
+    # Check host availability prior to port scanning
+    logger.info(f"Checking host availability on {canonical_target} ({target_ip})...")
+    if is_host_online(target_ip, timeout=args.timeout):
+        logger.info(f"Target '{canonical_target}' is online and responsive.")
+    else:
+        logger.warning(
+            f"Target '{canonical_target}' did not respond to ICMP/TCP ping (host may be down or firewalling probes)."
+        )
 
     # Record exact start time
     start_timestamp = time.time()

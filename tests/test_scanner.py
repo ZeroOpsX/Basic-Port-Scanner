@@ -298,5 +298,54 @@ class TestSignalHandler(unittest.TestCase):
         self.assertTrue(scan_context["interrupted"])
 
 
+class TestHostDiscovery(unittest.TestCase):
+    """Tests for core/host_discovery.py."""
+
+    @patch("subprocess.run")
+    def test_icmp_ping_success(self, mock_run):
+        from core.host_discovery import icmp_ping
+        mock_run.return_value = MagicMock(returncode=0)
+        self.assertTrue(icmp_ping("127.0.0.1", timeout=1.0))
+
+    @patch("subprocess.run")
+    def test_icmp_ping_failure(self, mock_run):
+        from core.host_discovery import icmp_ping
+        mock_run.return_value = MagicMock(returncode=1)
+        self.assertFalse(icmp_ping("192.0.2.1", timeout=1.0))
+
+    @patch("socket.socket")
+    def test_tcp_ping_success(self, mock_sock_cls):
+        from core.host_discovery import tcp_ping
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 0
+        mock_sock_cls.return_value = mock_sock
+        self.assertTrue(tcp_ping("127.0.0.1", port=80, timeout=1.0))
+
+    @patch("socket.socket")
+    def test_tcp_ping_failure(self, mock_sock_cls):
+        from core.host_discovery import tcp_ping
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 10060  # WSAETIMEDOUT
+        mock_sock_cls.return_value = mock_sock
+        self.assertFalse(tcp_ping("192.0.2.1", port=80, timeout=1.0))
+
+    @patch("core.host_discovery.icmp_ping", return_value=True)
+    def test_is_host_online_via_icmp(self, mock_icmp):
+        from core.host_discovery import is_host_online
+        self.assertTrue(is_host_online("127.0.0.1"))
+
+    @patch("core.host_discovery.icmp_ping", return_value=False)
+    @patch("core.host_discovery.tcp_ping", side_effect=lambda t, port, timeout: port == 443)
+    def test_is_host_online_via_tcp_fallback(self, mock_icmp, mock_tcp):
+        from core.host_discovery import is_host_online
+        self.assertTrue(is_host_online("192.168.1.1", fallback_ports=[80, 443]))
+
+    @patch("core.host_discovery.icmp_ping", return_value=False)
+    @patch("core.host_discovery.tcp_ping", return_value=False)
+    def test_is_host_online_offline(self, mock_icmp, mock_tcp):
+        from core.host_discovery import is_host_online
+        self.assertFalse(is_host_online("192.0.2.1", fallback_ports=[80]))
+
+
 if __name__ == "__main__":
     unittest.main()
