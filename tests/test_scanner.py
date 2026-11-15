@@ -280,7 +280,8 @@ class TestSignalHandler(unittest.TestCase):
         import signal
         from main import scan_context, signal_handler
 
-        scan_context["start_time"] = 100.0
+        scan_context["start_timestamp"] = 100.0
+        scan_context["start_time_str"] = "1970-01-01 00:01:40"
         scan_context["scanned_count"] = 5
         scan_context["total_ports"] = 100
         scan_context["target"] = "localhost"

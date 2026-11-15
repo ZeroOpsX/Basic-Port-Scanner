@@ -2,7 +2,7 @@
 """
 NetPulse - Modern CLI-based Port Scanner
 Main Entry Point connecting CLI parsing, target validation, and sequential scanning
-with graceful SIGINT (Ctrl+C) signal handling and partial results reporting.
+with execution time tracking, graceful signal handling, and reporting.
 """
 
 import signal
@@ -21,7 +21,8 @@ from utils.validators import resolve_target
 # Global scan context shared with the signal handler
 scan_context: Dict[str, Any] = {
     "interrupted": False,
-    "start_time": 0.0,
+    "start_timestamp": 0.0,
+    "start_time_str": "",
     "scanned_count": 0,
     "total_ports": 0,
     "target": "",
@@ -31,10 +32,27 @@ scan_context: Dict[str, Any] = {
 }
 
 
+def format_timestamp(timestamp: float) -> str:
+    """Formats a UNIX epoch timestamp into 'YYYY-MM-DD HH:MM:SS' using the time module."""
+    if not timestamp:
+        return "N/A"
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
+
+
+def format_duration(seconds: float) -> str:
+    """Formats seconds into human-readable duration."""
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    minutes = int(seconds // 60)
+    rem_seconds = seconds % 60
+    return f"{minutes}m {rem_seconds:.2f}s"
+
+
 def signal_handler(signum: int, frame: Any) -> None:
     """
     Handles SIGINT (Ctrl+C) and SIGTERM signals.
-    Halts scanning immediately, ensures socket cleanup, and outputs partial results.
+    Halts scanning immediately, ensures socket cleanup, and outputs partial results
+    along with exact start, end, and elapsed execution time.
     """
     if scan_context["interrupted"]:
         # Prevent cascading interruptions
@@ -42,12 +60,16 @@ def signal_handler(signum: int, frame: Any) -> None:
 
     scan_context["interrupted"] = True
 
+    end_timestamp = time.time()
+    start_timestamp = scan_context["start_timestamp"] or end_timestamp
+    duration = end_timestamp - start_timestamp
+    start_time_str = scan_context["start_time_str"] or format_timestamp(start_timestamp)
+    end_time_str = format_timestamp(end_timestamp)
+
     print("\n\n" + "=" * 65)
     print("[!] Scan aborted by user (Ctrl+C). Cleaning up resources...")
     print("=" * 65)
 
-    start_time = scan_context["start_time"]
-    elapsed = time.time() - start_time if start_time else 0.0
     open_ports = scan_context["open_ports"]
     scanned = scan_context["scanned_count"]
     total = scan_context["total_ports"]
@@ -63,10 +85,13 @@ def signal_handler(signum: int, frame: Any) -> None:
     else:
         print("No open ports were discovered prior to interruption.")
 
-    print("-" * 65)
-    logger.info(
-        f"Elapsed Time: {elapsed:.2f}s | Scanned: {scanned}/{total} ports | Open: {len(open_ports)}"
-    )
+    print("\n--- [ EXECUTION TIMING ] ---")
+    print(f"[*] Start Time     : {start_time_str}")
+    print(f"[*] End Time       : {end_time_str} (Aborted)")
+    print(f"[*] Total Duration : {duration:.2f} seconds ({format_duration(duration)})")
+    print(f"[*] Ports Scanned  : {scanned}/{total}")
+    print(f"[*] Open Found     : {len(open_ports)}")
+    print("=" * 65)
 
     # Export partial results if an output format was configured
     if scan_context.get("output_format") and open_ports:
@@ -109,8 +134,13 @@ def main():
 
     ports = args.ports_list
 
+    # Record exact start time
+    start_timestamp = time.time()
+    start_time_str = format_timestamp(start_timestamp)
+
     # Initialize shared scan context
-    scan_context["start_time"] = time.time()
+    scan_context["start_timestamp"] = start_timestamp
+    scan_context["start_time_str"] = start_time_str
     scan_context["total_ports"] = len(ports)
     scan_context["scanned_count"] = 0
     scan_context["target"] = canonical_target
@@ -119,12 +149,13 @@ def main():
     scan_context["open_ports"] = []
     scan_context["interrupted"] = False
 
-    # Print scan header
+    # Print scan header with start time
     logger.info(f"Target: {canonical_target} ({target_ip})")
+    logger.info(f"Scan Started at: {start_time_str}")
     logger.info(f"Initiating sequential scan on {len(ports)} port(s) (Timeout: {args.timeout}s)...")
-    print("-" * 60)
+    print("-" * 65)
     print(f"{'PORT':<12}{'STATE':<10}{'SERVICE':<15}")
-    print("-" * 60)
+    print("-" * 65)
 
     # 5. Iterate through the parsed port list and scan sequentially using scanner.py
     for port in ports:
@@ -145,15 +176,24 @@ def main():
             port_label = f"{port}/tcp"
             print(f"{port_label:<12}{'OPEN':<10}{service:<15}")
 
-    elapsed = time.time() - scan_context["start_time"]
+    # Record exact end time and duration
+    end_timestamp = time.time()
+    end_time_str = format_timestamp(end_timestamp)
+    total_duration = end_timestamp - start_timestamp
+
     open_ports = scan_context["open_ports"]
     scanned_count = scan_context["scanned_count"]
 
-    # 6. Summary and Reporting on normal completion
-    print("-" * 60)
-    logger.info(
-        f"Scan completed in {elapsed:.2f}s | Scanned: {scanned_count}/{len(ports)} | Open ports found: {len(open_ports)}"
-    )
+    # 6. Detailed Timing & Execution Summary
+    print("-" * 65)
+    print("                    [ SCAN SUMMARY ]")
+    print("-" * 65)
+    print(f"[*] Exact Start Time : {start_time_str}")
+    print(f"[*] Exact End Time   : {end_time_str}")
+    print(f"[*] Total Duration   : {total_duration:.2f} seconds ({format_duration(total_duration)})")
+    print(f"[*] Ports Scanned    : {scanned_count}/{len(ports)}")
+    print(f"[*] Open Ports Found : {len(open_ports)}")
+    print("-" * 65)
 
     # Export scan report if requested
     if args.output:
