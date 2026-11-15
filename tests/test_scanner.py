@@ -105,5 +105,28 @@ class TestLogger(unittest.TestCase):
             self.assertNotIn("Informational message", content)
 
 
+class TestCLI(unittest.TestCase):
+    """Tests for utils/cli.py."""
+
+    def test_cli_target_flag(self):
+        from utils.cli import parse_arguments
+        args = parse_arguments(["-t", "192.168.1.1", "-p", "80,443"])
+        self.assertEqual(args.target, "192.168.1.1")
+        self.assertEqual(args.ports, "80,443")
+
+    def test_cli_target_long_flag(self):
+        from utils.cli import parse_arguments
+        args = parse_arguments(["--target", "scanme.nmap.org", "--common"])
+        self.assertEqual(args.target, "scanme.nmap.org")
+        self.assertTrue(args.common)
+
+    def test_cli_missing_target_exits(self):
+        from utils.cli import parse_arguments
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.stderr"):
+                parse_arguments([])
+        self.assertEqual(cm.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

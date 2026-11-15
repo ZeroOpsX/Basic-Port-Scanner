@@ -4,75 +4,15 @@ NetPulse - Modern CLI-based Port Scanner
 Main Entry Point
 """
 
-import argparse
 import sys
 import time
 
-from core.constants import COMMON_PORTS, DEFAULT_THREADS, DEFAULT_TIMEOUT
+from core.constants import COMMON_PORTS
 from core.scanner import PortScanner
 from utils.banner import print_banner
+from utils.cli import parse_arguments
 from utils.helpers import export_results, parse_port_range, validate_target
-
-
-def parse_arguments() -> argparse.Namespace:
-    """Configures and parses CLI command line arguments."""
-    parser = argparse.ArgumentParser(
-        prog="NetPulse",
-        description="Fast, multi-threaded command-line TCP Port Scanner.",
-        epilog="Examples:\n"
-        "  python main.py 127.0.0.1 -p 80,443,8080\n"
-        "  python main.py scanme.nmap.org -p 1-1024 -w 200 -b\n"
-        "  python main.py localhost --common -o json\n",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-
-    parser.add_argument("target", help="Target hostname or IP address to scan")
-    parser.add_argument(
-        "-p",
-        "--ports",
-        type=str,
-        default=None,
-        help="Port specification (e.g., '80', '1-1024', '80,443,8080'). Default: 1-1024",
-    )
-    parser.add_argument(
-        "--common",
-        action="store_true",
-        help="Scan top standard/common ports only",
-    )
-    parser.add_argument(
-        "-t",
-        "--timeout",
-        type=float,
-        default=DEFAULT_TIMEOUT,
-        help=f"Socket connection timeout in seconds (default: {DEFAULT_TIMEOUT})",
-    )
-    parser.add_argument(
-        "-w",
-        "--workers",
-        type=int,
-        default=DEFAULT_THREADS,
-        help=f"Maximum concurrent worker threads (default: {DEFAULT_THREADS})",
-    )
-    parser.add_argument(
-        "-b",
-        "--banner",
-        action="store_true",
-        help="Attempt service banner grabbing on open ports",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        choices=["json", "txt"],
-        help="Export scan results to file in output/ directory (json or txt)",
-    )
-    parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="Suppress ASCII art banner header",
-    )
-
-    return parser.parse_args()
+from utils.logger import logger
 
 
 def main():

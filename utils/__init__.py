@@ -1,6 +1,7 @@
 """Utility functions for CLI parsing, display banners, configuration, and report output."""
 
 from .banner import print_banner
+from .cli import create_parser, parse_arguments
 from .config import (
     AUTHOR,
     COMMON_PORTS,
@@ -15,6 +16,8 @@ from .helpers import export_results, parse_port_range, validate_target
 from .logger import logger, setup_logger
 
 __all__ = [
+    "create_parser",
+    "parse_arguments",
     "print_banner",
     "parse_port_range",
     "validate_target",
