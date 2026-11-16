@@ -5,9 +5,10 @@ with fallback to common cybersecurity port registries and caching.
 """
 
 from functools import lru_cache
+import re
 import socket
 import ssl
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 
 try:
     from .constants import COMMON_PORTS, DEFAULT_TIMEOUT
@@ -217,6 +218,158 @@ def grab_http_headers(
                 pass
 
 
+SSH_OS_FAMILIES: Dict[str, str] = {
+    "ubuntu": "Ubuntu",
+    "debian": "Debian",
+    "raspbian": "Raspbian",
+    "centos": "CentOS",
+    "redhat": "Red Hat",
+    "red hat": "Red Hat",
+    "rhel": "Red Hat",
+    "fedora": "Fedora",
+    "freebsd": "FreeBSD",
+    "openbsd": "OpenBSD",
+    "netbsd": "NetBSD",
+    "alpine": "Alpine",
+    "arch": "Arch Linux",
+    "suse": "SUSE",
+    "opensuse": "openSUSE",
+    "gentoo": "Gentoo",
+    "windows": "Windows",
+    "cisco": "Cisco",
+    "darwin": "macOS",
+    "macos": "macOS",
+}
+
+
+def parse_ssh_banner(banner: str) -> Optional[Dict[str, Any]]:
+    """
+    Parses an SSH protocol identification banner (RFC 4253) on port 22 to extract
+    the exact OpenSSH version and underlying OS family.
+
+    Args:
+        banner: Raw SSH banner string (e.g. 'SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1').
+
+    Returns:
+        Dictionary with parsed fields:
+          - 'protocol': SSH protocol version (e.g. '2.0')
+          - 'software': Software identifier (e.g. 'OpenSSH_8.9p1')
+          - 'openssh_version': Version string (e.g. '8.9p1') or None
+          - 'os_family': OS family (e.g. 'Ubuntu', 'Debian', 'FreeBSD') or None
+          - 'comment': Extra comment string or ''
+          - 'highlighted': Formatted string (e.g. 'OpenSSH 8.9p1 (Ubuntu)')
+          - 'raw_banner': Cleaned raw banner
+        Returns None if input is empty or does not conform to SSH- protocol banner format.
+    """
+    if not banner or not isinstance(banner, str):
+        return None
+
+    raw = banner.strip()
+    if not raw.startswith("SSH-"):
+        return None
+
+    match = re.match(
+        r"^SSH-(?P<proto>[0-9\.]+)-(?P<software>[^\s]+)(?:\s+(?P<comment>.*))?",
+        raw,
+    )
+    if not match:
+        return None
+
+    proto = match.group("proto")
+    software = match.group("software")
+    comment = match.group("comment") or ""
+
+    # Extract exact OpenSSH version (e.g. 8.9p1, 7.4p1)
+    openssh_match = re.search(
+        r"OpenSSH[_-]([0-9]+(?:\.[0-9]+)+(?:p[0-9]+)?)",
+        software,
+        re.IGNORECASE,
+    )
+    openssh_version = openssh_match.group(1) if openssh_match else None
+
+    # Detect OS family from software comments (case-insensitive substring check)
+    os_family = None
+    full_comment = f"{software} {comment}".lower()
+    for sig, name in SSH_OS_FAMILIES.items():
+        if sig in full_comment:
+            os_family = name
+            break
+
+    # Build highlighted summary for display and reporting
+    if openssh_version and os_family:
+        highlighted = f"OpenSSH {openssh_version} ({os_family})"
+    elif openssh_version:
+        highlighted = f"OpenSSH {openssh_version}"
+    elif os_family:
+        highlighted = f"{software} ({os_family})"
+    else:
+        highlighted = software
+
+    return {
+        "protocol": proto,
+        "software": software,
+        "openssh_version": openssh_version,
+        "os_family": os_family,
+        "comment": comment,
+        "highlighted": highlighted,
+        "raw_banner": raw,
+    }
+
+
+def format_ssh_banner(banner: str) -> str:
+    """
+    Parses an SSH banner string and returns a highlighted summary
+    displaying the exact OpenSSH version and OS family.
+    """
+    parsed = parse_ssh_banner(banner)
+    if parsed and parsed.get("highlighted"):
+        return parsed["highlighted"]
+    return banner.strip() if banner else ""
+
+
+def grab_ssh_info(
+    ip: str,
+    port: int = 22,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> Optional[Dict[str, Any]]:
+    """
+    Connects to an open SSH port, reads the identification banner,
+    and returns parsed metadata highlighting the OpenSSH version and OS family.
+
+    Args:
+        ip: Target host IP address or hostname.
+        port: SSH port number (default: 22).
+        timeout: Socket timeout in seconds.
+
+    Returns:
+        Parsed SSH dictionary or None if connection fails or banner is missing.
+    """
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((ip, port))
+        try:
+            sock.sendall(b"\r\n")
+        except (socket.error, OSError):
+            pass
+
+        data = sock.recv(1024)
+        if not data:
+            return None
+
+        raw = data.decode("utf-8", errors="ignore").strip()
+        return parse_ssh_banner(raw)
+    except (socket.timeout, socket.error, OSError, KeyboardInterrupt):
+        return None
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
 def grab_banner(
     ip: str,
     port: int,
@@ -266,7 +419,11 @@ def grab_banner(
         if not data:
             return ""
 
-        return data.decode("utf-8", errors="ignore").strip()
+        raw_banner = data.decode("utf-8", errors="ignore").strip()
+        if port == 22 or raw_banner.startswith("SSH-"):
+            return format_ssh_banner(raw_banner)
+
+        return raw_banner
     except (socket.timeout, socket.error, OSError, KeyboardInterrupt):
         return ""
     finally:
@@ -324,3 +481,15 @@ class ServiceDetector:
         Sends HTTP HEAD request and extracts Server and X-Powered-By headers.
         """
         return grab_http_headers(ip, port, timeout=timeout)
+
+    def parse_ssh_banner(self, banner: str) -> Optional[Dict[str, Any]]:
+        """
+        Parses an SSH banner string to highlight OpenSSH version and OS family.
+        """
+        return parse_ssh_banner(banner)
+
+    def grab_ssh_info(self, ip: str, port: int = 22, timeout: float = DEFAULT_TIMEOUT) -> Optional[Dict[str, Any]]:
+        """
+        Connects to SSH and extracts structured OpenSSH and OS metadata.
+        """
+        return grab_ssh_info(ip, port=port, timeout=timeout)

@@ -21,13 +21,17 @@ from .scanner import (
 )
 from .service_detector import (
     HTTP_PORTS,
+    SSH_OS_FAMILIES,
     ServiceDetector,
     detect_service,
     extract_http_headers,
+    format_ssh_banner,
     get_iana_service_name,
     get_service_name,
     grab_http_headers,
+    grab_ssh_info,
     map_ports_to_services,
+    parse_ssh_banner,
 )
 from .ssl_inspector import (
     SSLInspector,
@@ -60,6 +64,10 @@ __all__ = [
     "extract_http_headers",
     "grab_http_headers",
     "HTTP_PORTS",
+    "parse_ssh_banner",
+    "format_ssh_banner",
+    "grab_ssh_info",
+    "SSH_OS_FAMILIES",
     "inspect_ssl",
     "get_ssl_certificate",
     "is_ssl_port",

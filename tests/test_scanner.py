@@ -921,15 +921,72 @@ class TestServiceDetector(unittest.TestCase):
     def test_grab_banner_success(self, mock_socket_cls):
         from core.service_detector import grab_banner
         mock_sock = MagicMock()
-        mock_sock.recv.return_value = b"SSH-2.0-OpenSSH_8.9p1\r\n"
+        mock_sock.recv.return_value = b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
         mock_socket_cls.return_value = mock_sock
 
         banner = grab_banner("127.0.0.1", 22, timeout=1.0)
-        self.assertEqual(banner, "SSH-2.0-OpenSSH_8.9p1")
+        self.assertEqual(banner, "OpenSSH 8.9p1 (Ubuntu)")
         mock_sock.connect.assert_called_once_with(("127.0.0.1", 22))
         mock_sock.sendall.assert_called_once_with(b"\r\n")
         mock_sock.recv.assert_called_once_with(1024)
         mock_sock.close.assert_called_once()
+
+    def test_parse_ssh_banner_os_families(self):
+        from core.service_detector import format_ssh_banner, parse_ssh_banner
+
+        # Ubuntu
+        u_info = parse_ssh_banner("SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1")
+        self.assertIsNotNone(u_info)
+        self.assertEqual(u_info["openssh_version"], "8.9p1")
+        self.assertEqual(u_info["os_family"], "Ubuntu")
+        self.assertEqual(u_info["highlighted"], "OpenSSH 8.9p1 (Ubuntu)")
+        self.assertEqual(format_ssh_banner("SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1"), "OpenSSH 8.9p1 (Ubuntu)")
+
+        # Debian
+        d_info = parse_ssh_banner("SSH-2.0-OpenSSH_8.4p1 Debian-5+deb11u1")
+        self.assertIsNotNone(d_info)
+        self.assertEqual(d_info["openssh_version"], "8.4p1")
+        self.assertEqual(d_info["os_family"], "Debian")
+        self.assertEqual(d_info["highlighted"], "OpenSSH 8.4p1 (Debian)")
+
+        # FreeBSD
+        f_info = parse_ssh_banner("SSH-2.0-OpenSSH_9.3p1 FreeBSD-20230719")
+        self.assertIsNotNone(f_info)
+        self.assertEqual(f_info["openssh_version"], "9.3p1")
+        self.assertEqual(f_info["os_family"], "FreeBSD")
+        self.assertEqual(f_info["highlighted"], "OpenSSH 9.3p1 (FreeBSD)")
+
+        # CentOS / Red Hat
+        r_info = parse_ssh_banner("SSH-2.0-OpenSSH_8.0 (Red Hat Enterprise Linux 8)")
+        self.assertIsNotNone(r_info)
+        self.assertEqual(r_info["openssh_version"], "8.0")
+        self.assertEqual(r_info["os_family"], "Red Hat")
+        self.assertEqual(r_info["highlighted"], "OpenSSH 8.0 (Red Hat)")
+
+        # No OS family
+        generic = parse_ssh_banner("SSH-2.0-OpenSSH_7.4p1-hpn14v12")
+        self.assertIsNotNone(generic)
+        self.assertEqual(generic["openssh_version"], "7.4p1")
+        self.assertIsNone(generic["os_family"])
+        self.assertEqual(generic["highlighted"], "OpenSSH 7.4p1")
+
+        # Invalid or non-SSH banners
+        self.assertIsNone(parse_ssh_banner("HTTP/1.1 200 OK"))
+        self.assertIsNone(parse_ssh_banner(""))
+        self.assertIsNone(parse_ssh_banner(None))
+
+    @patch("socket.socket")
+    def test_grab_ssh_info(self, mock_socket_cls):
+        from core.service_detector import grab_ssh_info
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
+        mock_socket_cls.return_value = mock_sock
+
+        info = grab_ssh_info("127.0.0.1", 22, timeout=1.0)
+        self.assertIsNotNone(info)
+        self.assertEqual(info["openssh_version"], "8.9p1")
+        self.assertEqual(info["os_family"], "Ubuntu")
+        self.assertEqual(info["highlighted"], "OpenSSH 8.9p1 (Ubuntu)")
 
     @patch("socket.socket")
     def test_grab_banner_empty_response(self, mock_socket_cls):
