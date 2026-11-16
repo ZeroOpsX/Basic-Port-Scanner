@@ -321,6 +321,10 @@ def main():
     target_ip_str = targets[0][1] if len(targets) == 1 else args.target
 
     # 6. Detailed Timing & Execution Summary Table
+    total_vulns = sum(len(p.get("vulns", [])) for p in open_ports)
+    if total_vulns > 0:
+        print(f"[*] Vulnerabilities  : {total_vulns} flagged")
+
     print_summary_table(
         results=[p for p in open_ports if str(p.get("state")).upper() == "OPEN"] if not args.verbose else open_ports,
         target=args.target,
