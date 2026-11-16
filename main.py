@@ -11,19 +11,18 @@ import time
 from typing import Any, Dict
 
 from core.async_scanner import run_async_scan
-from core.constants import COMMON_PORTS
 from core.host_discovery import get_host_os_guess, is_host_online
-from core.scanner import scan_port, scan_ports_concurrent
+from core.scanner import scan_ports_concurrent
 from core.syn_scanner import check_admin_privileges, syn_scan_ports
 from core.udp_scanner import scan_udp_ports_concurrent
-from core.vuln_checks import check_ftp_anonymous, run_port_vulnerability_checks
+from core.vuln_checks import run_port_vulnerability_checks
 from output.display import print_port_result, print_summary_table
-from output.exporter import export_csv, export_html, export_json
+from output.exporter import export_csv, export_html, export_json, export_txt
 from utils.banner import print_banner
 from utils.cli import parse_arguments
 from utils.helpers import export_results
 from utils.logger import logger
-from utils.validators import resolve_target, resolve_targets
+from utils.validators import resolve_targets
 
 # Global scan context shared with the signal handler
 scan_context: Dict[str, Any] = {
@@ -314,6 +313,7 @@ def main():
     end_timestamp = time.time()
     end_time_str = format_timestamp(end_timestamp)
     total_duration = end_timestamp - start_timestamp
+    logger.info(f"Scan Completed at: {end_time_str}")
 
     open_ports = scan_context["open_ports"]
     scanned_count = scan_context["scanned_count"]
@@ -372,13 +372,15 @@ def main():
 
     # Plain text export (-o txt)
     if args.output == "txt":
-        saved_file = export_results(
+        txt_file = export_txt(
             results=export_list,
             target=args.target,
             target_ip=target_ip_str,
-            export_format="txt",
+            duration=total_duration,
+            scanned_count=scanned_count,
+            total_ports=total_probes,
         )
-        logger.info(f"Text Report exported: {saved_file}")
+        logger.info(f"Text Report exported: {txt_file}")
 
 
 if __name__ == "__main__":
