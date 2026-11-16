@@ -394,6 +394,38 @@ class TestCLI(unittest.TestCase):
         self.assertIn(443, args.ports_list)
         self.assertIn(22, args.ports_list)
 
+    def test_cli_randomize_flag(self):
+        from utils.cli import parse_arguments
+        from utils.config import TOP_100_PORTS_LIST
+
+        # Default should be False
+        args_default = parse_arguments(["-t", "127.0.0.1", "-p", "1-10"])
+        self.assertFalse(args_default.randomize)
+        self.assertEqual(args_default.ports_list, list(range(1, 11)))
+
+        # Test -r flag
+        args_short = parse_arguments(["-t", "127.0.0.1", "-p", "1-10", "-r"])
+        self.assertTrue(args_short.randomize)
+        self.assertEqual(sorted(args_short.ports_list), list(range(1, 11)))
+
+        # Test --randomize flag
+        args_long = parse_arguments(["-t", "127.0.0.1", "-p", "1-100", "--randomize"])
+        self.assertTrue(args_long.randomize)
+        self.assertEqual(sorted(args_long.ports_list), list(range(1, 101)))
+        # For 100 items, shuffled order is virtually guaranteed not to match sequential order
+        self.assertNotEqual(args_long.ports_list, list(range(1, 101)))
+
+        # Verify random.shuffle was called
+        with patch("random.shuffle") as mock_shuffle:
+            parse_arguments(["-t", "127.0.0.1", "-p", "80,443", "--randomize"])
+            mock_shuffle.assert_called_once()
+
+        # Verify that original TOP_100_PORTS_LIST is not mutated when randomized
+        original_top_copy = list(TOP_100_PORTS_LIST)
+        args_top_rand = parse_arguments(["-t", "127.0.0.1", "--top-ports", "--randomize"])
+        self.assertEqual(TOP_100_PORTS_LIST, original_top_copy)
+        self.assertEqual(sorted(args_top_rand.ports_list), sorted(original_top_copy))
+
 
 class TestValidators(unittest.TestCase):
     """Tests for utils/validators.py using ipaddress module."""

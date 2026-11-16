@@ -166,8 +166,9 @@ def main():
     logger.info(f"Target: {canonical_target} ({target_ip})")
     logger.info(f"Scan Started at: {start_time_str}")
     rate_limit_msg = f" | Rate Limit: {args.rate_limit}ms" if args.rate_limit > 0 else ""
+    randomize_msg = " | Order: Randomized" if args.randomize else ""
     logger.info(
-        f"Initiating multi-threaded scan on {len(ports)} port(s) with {args.threads} worker threads (Timeout: {args.timeout}s{rate_limit_msg})..."
+        f"Initiating multi-threaded scan on {len(ports)} port(s) with {args.threads} worker threads (Timeout: {args.timeout}s{rate_limit_msg}{randomize_msg})..."
     )
     print("-" * 65)
     print(f"{'PORT':<12}{'STATE':<10}{'SERVICE':<15}")

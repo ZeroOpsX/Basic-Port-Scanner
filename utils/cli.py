@@ -5,6 +5,7 @@ and port parsing logic for single ports, comma-separated lists, and ranges.
 """
 
 import argparse
+import random
 import sys
 from typing import List, Optional
 
@@ -26,7 +27,7 @@ except ImportError:
     TOP_100_PORTS_LIST = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080, 8443]
 
 CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | TARGET) [-p PORTS | --common | --top-ports]
-                [-Pn] [-T THREADS] [--timeout TIMEOUT] [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
+                [-Pn] [-r] [-T THREADS] [--timeout TIMEOUT] [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
 
 CUSTOM_DESCRIPTION = f"""
 ================================================================================
@@ -61,6 +62,9 @@ Examples:
 
   # Rate-limited scan (50ms delay between requests) to evade firewall thresholds:
   python main.py -t 192.168.1.1 --top-ports --rate-limit 50
+
+  # Randomize port scan order to evade sequential IDS detection:
+  python main.py -t 192.168.1.1 -p 1-1000 --randomize
 
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
@@ -177,6 +181,13 @@ def create_parser() -> argparse.ArgumentParser:
         dest="top_ports",
         action="store_true",
         help="Scan the top 100 most common TCP ports based on Nmap statistics",
+    )
+    port_group.add_argument(
+        "-r",
+        "--randomize",
+        dest="randomize",
+        action="store_true",
+        help="Randomize port scan order using random.shuffle() to evade sequential IDS detection",
     )
 
     # Host Discovery Options
@@ -305,9 +316,9 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
 
     # Parse port specifications into a list of integers
     if parsed_args.top_ports:
-        parsed_args.ports_list = TOP_100_PORTS_LIST
+        parsed_args.ports_list = list(TOP_100_PORTS_LIST)
     elif parsed_args.common:
-        parsed_args.ports_list = COMMON_PORTS_LIST
+        parsed_args.ports_list = list(COMMON_PORTS_LIST)
     elif parsed_args.ports:
         try:
             parsed_args.ports_list = parse_ports(parsed_args.ports)
@@ -317,6 +328,11 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
     else:
         # Default standard port range: 1 - 1024
         parsed_args.ports_list = list(range(1, 1025))
+
+    # Randomize port scan order if requested to evade sequential IDS detection
+    if parsed_args.randomize:
+        parsed_args.ports_list = list(parsed_args.ports_list)
+        random.shuffle(parsed_args.ports_list)
 
     return parsed_args
 
