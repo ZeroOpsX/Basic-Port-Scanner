@@ -1530,5 +1530,193 @@ class TestUDPScanner(unittest.TestCase):
         self.assertIn("Response/Banner: DNS Response", out)
 
 
+class TestSYNScanner(unittest.TestCase):
+    """Tests for core/syn_scanner.py raw TCP SYN stealth scanner and -sS flag."""
+
+    @patch("platform.system", return_value="Windows")
+    @patch("ctypes.windll.shell32.IsUserAnAdmin")
+    def test_is_root_or_admin_windows(self, mock_is_admin, mock_sys):
+        from core.syn_scanner import is_root_or_admin
+        mock_is_admin.return_value = 1
+        self.assertTrue(is_root_or_admin())
+
+        mock_is_admin.return_value = 0
+        self.assertFalse(is_root_or_admin())
+
+    @patch("platform.system", return_value="Linux")
+    @patch("os.geteuid", create=True)
+    def test_is_root_or_admin_linux(self, mock_geteuid, mock_sys):
+        from core.syn_scanner import is_root_or_admin
+        mock_geteuid.return_value = 0
+        self.assertTrue(is_root_or_admin())
+
+        mock_geteuid.return_value = 1000
+        self.assertFalse(is_root_or_admin())
+
+    @patch("core.syn_scanner.is_root_or_admin", return_value=True)
+    def test_check_admin_privileges_granted(self, mock_admin):
+        from core.syn_scanner import check_admin_privileges
+        try:
+            check_admin_privileges()
+        except PermissionError:
+            self.fail("check_admin_privileges() raised PermissionError unexpectedly!")
+
+    @patch("core.syn_scanner.is_root_or_admin", return_value=False)
+    def test_check_admin_privileges_denied(self, mock_admin):
+        from core.syn_scanner import check_admin_privileges
+        with self.assertRaises(PermissionError):
+            check_admin_privileges()
+
+    @patch("core.syn_scanner.SCAPY_AVAILABLE", True)
+    @patch("core.syn_scanner.IP")
+    @patch("core.syn_scanner.TCP")
+    @patch("core.syn_scanner.sr1")
+    @patch("core.syn_scanner.send")
+    def test_syn_scan_port_syn_ack_open(self, mock_send, mock_sr1, mock_tcp, mock_ip):
+        from core.syn_scanner import syn_scan_port
+        mock_resp = MagicMock()
+        mock_resp.haslayer.side_effect = lambda layer: layer == mock_tcp
+        mock_tcp_layer = MagicMock()
+        mock_tcp_layer.flags = 0x12  # SYN-ACK
+        mock_tcp_layer.ack = 12345
+        mock_resp.getlayer.return_value = mock_tcp_layer
+        mock_sr1.return_value = mock_resp
+
+        res = syn_scan_port("192.168.1.1", 80, timeout=1.0, enforce_admin=False)
+        self.assertEqual(res["port"], 80)
+        self.assertEqual(res["protocol"], "tcp")
+        self.assertEqual(res["state"], "OPEN")
+        self.assertEqual(res["service"], "HTTP")
+        # Ensure raw RST tear-down packet was transmitted
+        mock_send.assert_called_once()
+
+    @patch("core.syn_scanner.SCAPY_AVAILABLE", True)
+    @patch("core.syn_scanner.IP")
+    @patch("core.syn_scanner.TCP")
+    @patch("core.syn_scanner.sr1")
+    @patch("core.syn_scanner.send")
+    def test_syn_scan_port_rst_closed(self, mock_send, mock_sr1, mock_tcp, mock_ip):
+        from core.syn_scanner import syn_scan_port
+        mock_resp = MagicMock()
+        mock_resp.haslayer.side_effect = lambda layer: layer == mock_tcp
+        mock_tcp_layer = MagicMock()
+        mock_tcp_layer.flags = 0x14  # RST-ACK
+        mock_resp.getlayer.return_value = mock_tcp_layer
+        mock_sr1.return_value = mock_resp
+
+        res = syn_scan_port("192.168.1.1", 22, timeout=1.0, enforce_admin=False)
+        self.assertEqual(res["port"], 22)
+        self.assertEqual(res["state"], "CLOSED")
+        self.assertEqual(res["service"], "SSH")
+        # RST packet should not be sent on already closed port
+        mock_send.assert_not_called()
+
+    @patch("core.syn_scanner.SCAPY_AVAILABLE", True)
+    @patch("core.syn_scanner.IP")
+    @patch("core.syn_scanner.TCP")
+    @patch("core.syn_scanner.sr1")
+    def test_syn_scan_port_timeout_filtered(self, mock_sr1, mock_tcp, mock_ip):
+        from core.syn_scanner import syn_scan_port
+        mock_sr1.return_value = None
+
+        res = syn_scan_port("10.0.0.1", 443, timeout=1.0, enforce_admin=False)
+        self.assertEqual(res["port"], 443)
+        self.assertEqual(res["state"], "FILTERED")
+
+    @patch("core.syn_scanner.SCAPY_AVAILABLE", True)
+    @patch("core.syn_scanner.IP")
+    @patch("core.syn_scanner.TCP")
+    @patch("core.syn_scanner.ICMP")
+    @patch("core.syn_scanner.sr1")
+    def test_syn_scan_port_icmp_filtered(self, mock_sr1, mock_icmp, mock_tcp, mock_ip):
+        from core.syn_scanner import syn_scan_port
+        mock_resp = MagicMock()
+        mock_resp.haslayer.side_effect = lambda layer: layer == mock_icmp
+        mock_icmp_layer = MagicMock()
+        mock_icmp_layer.type = 3
+        mock_icmp_layer.code = 3
+        mock_resp.getlayer.return_value = mock_icmp_layer
+        mock_sr1.return_value = mock_resp
+
+        res = syn_scan_port("10.0.0.1", 3306, timeout=1.0, enforce_admin=False)
+        self.assertEqual(res["port"], 3306)
+        self.assertEqual(res["state"], "FILTERED")
+
+    @patch("core.syn_scanner.SCAPY_AVAILABLE", False)
+    def test_syn_scan_missing_scapy_raises_import_error(self):
+        from core.syn_scanner import syn_scan_port
+        with self.assertRaises(ImportError):
+            syn_scan_port("127.0.0.1", 80, enforce_admin=False)
+
+    @patch("core.syn_scanner.syn_scan_port")
+    def test_syn_scan_ports_concurrent(self, mock_syn_scan):
+        from core.syn_scanner import syn_scan_ports
+
+        def fake_scan(ip, port, timeout, enforce_admin):
+            if port == 80:
+                return {"port": 80, "protocol": "tcp", "state": "OPEN", "service": "HTTP"}
+            return {"port": port, "protocol": "tcp", "state": "CLOSED", "service": "SSH"}
+
+        mock_syn_scan.side_effect = fake_scan
+        discovered = []
+        res = syn_scan_ports(
+            ip="192.168.1.1",
+            ports=[22, 80],
+            timeout=1.0,
+            max_workers=2,
+            on_port_scanned=lambda r: discovered.append(r),
+            enforce_admin=False,
+        )
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["port"], 80)
+        self.assertEqual(len(discovered), 1)
+
+    @patch("core.syn_scanner.syn_scan_ports")
+    def test_syn_scanner_class(self, mock_concurrent):
+        from core.syn_scanner import SYNScanner
+        mock_concurrent.return_value = [{"port": 443, "state": "OPEN"}]
+        scanner = SYNScanner(target="127.0.0.1", timeout=2.0, max_workers=5, enforce_admin=False)
+        self.assertEqual(scanner.target, "127.0.0.1")
+        res = scanner.scan_ports([443])
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["port"], 443)
+
+    def test_cli_syn_flag_parsing(self):
+        from utils.cli import parse_arguments
+        args = parse_arguments(["-t", "192.168.1.1", "-sS", "-p", "80,443"])
+        self.assertTrue(args.syn_scan)
+        self.assertEqual(args.ports_list, [80, 443])
+
+    @patch("sys.argv", ["main.py", "-t", "127.0.0.1", "-sS", "-p", "80", "-Pn", "-q"])
+    @patch("main.is_host_online", return_value=True)
+    @patch("main.check_admin_privileges")
+    @patch("main.syn_scan_ports")
+    def test_main_syn_scan_execution(self, mock_syn_scan, mock_admin, mock_host_online):
+        import io
+        from unittest.mock import patch
+        import main
+
+        def fake_scan(ip, ports, timeout, max_workers, rate_limit_ms, on_port_scanned, enforce_admin):
+            on_port_scanned({"port": 80, "protocol": "tcp", "state": "OPEN", "service": "HTTP"})
+            return [{"port": 80, "protocol": "tcp", "state": "OPEN", "service": "HTTP"}]
+
+        mock_syn_scan.side_effect = fake_scan
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            main.main()
+
+        out = captured.getvalue()
+        self.assertIn("80/tcp", out)
+        self.assertIn("HTTP", out)
+
+    @patch("sys.argv", ["main.py", "-t", "127.0.0.1", "-sS", "-p", "80", "-Pn", "-q"])
+    @patch("main.check_admin_privileges", side_effect=PermissionError("Admin rights required"))
+    def test_main_syn_scan_admin_denied(self, mock_admin):
+        import main
+        with self.assertRaises(SystemExit) as cm:
+            main.main()
+        self.assertEqual(cm.exception.code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,7 +30,7 @@ except ImportError:
     COMMON_UDP_PORTS_LIST = [53, 67, 68, 69, 123, 137, 138, 161, 162, 500, 514, 520, 1900, 5353]
     TOP_100_PORTS_LIST = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080, 8443]
 
-CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | -iL FILE | TARGET) [-sU] [-p PORTS | --common | --top-ports]
+CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | -iL FILE | TARGET) [-sS] [-sU] [-p PORTS | --common | --top-ports]
                 [--exclude-ports PORTS] [-Pn] [-r] [--async] [-T THREADS] [--timeout TIMEOUT]
                 [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
 
@@ -85,6 +85,9 @@ Examples:
 
   # UDP port scan for common UDP services (DNS, SNMP, NTP):
   python main.py -t 8.8.8.8 -sU
+
+  # TCP SYN stealth scan (requires root/admin privileges):
+  python main.py -t 192.168.1.1 -sS -p 80,443
 
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
@@ -230,6 +233,13 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Port options
     port_group = parser.add_argument_group("Port Scan Options")
+    port_group.add_argument(
+        "-sS",
+        "--syn",
+        dest="syn_scan",
+        action="store_true",
+        help="Enable raw TCP SYN stealth scan (half-open) using Scapy (requires root/admin privileges)",
+    )
     port_group.add_argument(
         "-sU",
         "--udp",

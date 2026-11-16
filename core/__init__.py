@@ -40,6 +40,13 @@ from .ssl_inspector import (
     is_ssl_port,
     parse_certificate_dict,
 )
+from .syn_scanner import (
+    SYNScanner,
+    check_admin_privileges,
+    is_root_or_admin,
+    syn_scan_port,
+    syn_scan_ports,
+)
 from .udp_scanner import (
     UDPScanner,
     scan_udp_port,
@@ -56,6 +63,7 @@ __all__ = [
     "AsyncPortScanner",
     "ServiceDetector",
     "SSLInspector",
+    "SYNScanner",
     "UDPScanner",
     "VulnerabilityChecker",
     "scan_port",
@@ -63,6 +71,10 @@ __all__ = [
     "scan_ports_concurrent",
     "scan_ports_async",
     "run_async_scan",
+    "syn_scan_port",
+    "syn_scan_ports",
+    "is_root_or_admin",
+    "check_admin_privileges",
     "scan_udp_port",
     "scan_udp_ports_concurrent",
     "create_port_queue",

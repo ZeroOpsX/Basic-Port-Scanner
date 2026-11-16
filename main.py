@@ -14,6 +14,7 @@ from core.async_scanner import run_async_scan
 from core.constants import COMMON_PORTS
 from core.host_discovery import is_host_online
 from core.scanner import scan_port, scan_ports_concurrent
+from core.syn_scanner import check_admin_privileges, syn_scan_ports
 from core.udp_scanner import scan_udp_ports_concurrent
 from core.vuln_checks import check_ftp_anonymous, run_port_vulnerability_checks
 from utils.banner import print_banner
@@ -151,6 +152,15 @@ def main():
     ports = args.ports_list
     multi_host = len(targets) > 1 or bool(getattr(args, "input_file", None))
 
+    # Enforce root/administrator privileges upfront if TCP SYN scan is requested
+    if getattr(args, "syn_scan", False):
+        try:
+            check_admin_privileges()
+        except PermissionError as err:
+            logger.error(str(err))
+            print(f"[!] Error: {err}", file=sys.stderr)
+            sys.exit(1)
+
     # Record exact start time
     start_timestamp = time.time()
     start_time_str = format_timestamp(start_timestamp)
@@ -175,7 +185,10 @@ def main():
         if getattr(args, "exclude_ports", None)
         else ""
     )
-    if getattr(args, "udp_scan", False):
+    if getattr(args, "syn_scan", False):
+        concurrency = min(args.threads, 30)
+        engine_msg = f"TCP SYN stealth engine (Half-Open Scapy, {concurrency} workers)"
+    elif getattr(args, "udp_scan", False):
         concurrency = min(args.threads, 30)
         engine_msg = f"UDP engine (SOCK_DGRAM, {concurrency} workers)"
     elif args.use_async:
@@ -245,7 +258,17 @@ def main():
 
         cb = make_port_callback(target_ip)
 
-        if getattr(args, "udp_scan", False):
+        if getattr(args, "syn_scan", False):
+            syn_scan_ports(
+                ip=target_ip,
+                ports=ports,
+                timeout=args.timeout,
+                max_workers=min(args.threads, 30),
+                rate_limit_ms=args.rate_limit,
+                on_port_scanned=cb,
+                enforce_admin=False,
+            )
+        elif getattr(args, "udp_scan", False):
             scan_udp_ports_concurrent(
                 ip=target_ip,
                 ports=ports,
