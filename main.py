@@ -14,6 +14,7 @@ from core.async_scanner import run_async_scan
 from core.constants import COMMON_PORTS
 from core.host_discovery import is_host_online
 from core.scanner import scan_port, scan_ports_concurrent
+from core.vuln_checks import check_ftp_anonymous, run_port_vulnerability_checks
 from utils.banner import print_banner
 from utils.cli import parse_arguments
 from utils.helpers import export_results
@@ -207,6 +208,15 @@ def main():
         else:
             print(f"{port_label:<12}{'OPEN':<10}{port_entry['service']:<15}")
 
+        # Check for service vulnerabilities (e.g., FTP anonymous login on port 21)
+        host_ip = port_entry.get("host") or (targets[0][1] if len(targets) == 1 else args.target)
+        vulns = run_port_vulnerability_checks(host_ip, port_entry["port"], timeout=args.timeout)
+        if vulns:
+            port_entry["vulns"] = vulns
+            for vuln in vulns:
+                flag = vuln.get("flag") or f"[!] VULN: {vuln.get('title')}"
+                print(f"  └── {flag}")
+
     # 5. Execute Scan across resolved target hosts
     for canonical_target, target_ip in targets:
         # Check host availability unless -Pn is specified
@@ -268,6 +278,9 @@ def main():
         print(f"[*] Hosts In Range   : {len(targets)}")
     print(f"[*] Ports Scanned    : {scanned_count}/{total_probes}")
     print(f"[*] Open Ports Found : {len(open_ports)}")
+    total_vulns = sum(len(p.get("vulns", [])) for p in open_ports)
+    if total_vulns > 0:
+        print(f"[*] Vulnerabilities  : {total_vulns} flagged")
     print("-" * 65)
 
     # Export scan report if requested

@@ -1247,5 +1247,102 @@ class TestSSLInspector(unittest.TestCase):
         self.assertTrue(inspector.is_ssl("127.0.0.1", 443))
 
 
+class TestVulnChecks(unittest.TestCase):
+    """Tests for core/vuln_checks.py FTP anonymous login and vulnerability audits."""
+
+    @patch("core.vuln_checks.ftplib.FTP")
+    def test_check_ftp_anonymous_allowed(self, mock_ftp_cls):
+        from core.vuln_checks import check_ftp_anonymous
+        mock_ftp = MagicMock()
+        mock_ftp.getwelcome.return_value = "220 ProFTPD Server ready."
+        mock_ftp.login.return_value = "230 Anonymous user logged in."
+        mock_ftp_cls.return_value = mock_ftp
+
+        res = check_ftp_anonymous("192.168.1.50", port=21, timeout=2.0)
+        self.assertTrue(res["vulnerable"])
+        self.assertTrue(res["allowed"])
+        self.assertEqual(res["port"], 21)
+        self.assertEqual(res["service"], "FTP")
+        self.assertEqual(res["vuln_id"], "FTP-ANON-LOGIN")
+        self.assertEqual(res["banner"], "220 ProFTPD Server ready.")
+        self.assertIn("230", res["response"])
+        self.assertEqual(res["flag"], "[!] VULN: FTP Anonymous Login Allowed")
+        mock_ftp.connect.assert_called_once_with("192.168.1.50", 21, timeout=2.0)
+        mock_ftp.login.assert_called_once_with("anonymous", "anonymous@")
+        mock_ftp.quit.assert_called_once()
+
+    @patch("core.vuln_checks.ftplib.FTP")
+    def test_check_ftp_anonymous_permission_denied(self, mock_ftp_cls):
+        import ftplib
+        from core.vuln_checks import check_ftp_anonymous
+        mock_ftp = MagicMock()
+        mock_ftp.getwelcome.return_value = "220 vsftpd 3.0.3"
+        mock_ftp.login.side_effect = ftplib.error_perm("530 Permission denied.")
+        mock_ftp_cls.return_value = mock_ftp
+
+        res = check_ftp_anonymous("192.168.1.50", port=21, timeout=1.5)
+        self.assertFalse(res["vulnerable"])
+        self.assertFalse(res["allowed"])
+        self.assertEqual(res["port"], 21)
+        self.assertIsNone(res["flag"])
+        self.assertIn("530 Permission denied.", res["response"])
+        mock_ftp.close.assert_called_once()
+
+    @patch("core.vuln_checks.ftplib.FTP")
+    def test_check_ftp_anonymous_timeout_error(self, mock_ftp_cls):
+        from core.vuln_checks import check_ftp_anonymous
+        mock_ftp = MagicMock()
+        mock_ftp.connect.side_effect = socket.timeout("timed out")
+        mock_ftp_cls.return_value = mock_ftp
+
+        res = check_ftp_anonymous("10.0.0.1", port=21, timeout=1.0)
+        self.assertFalse(res["vulnerable"])
+        self.assertFalse(res["allowed"])
+        self.assertEqual(res["port"], 21)
+        self.assertIsNone(res["flag"])
+        self.assertIn("timed out", res["response"])
+
+    @patch("core.vuln_checks.check_ftp_anonymous")
+    def test_run_port_vulnerability_checks(self, mock_ftp_check):
+        from core.vuln_checks import run_port_vulnerability_checks
+
+        mock_ftp_check.return_value = {
+            "vulnerable": True,
+            "port": 21,
+            "title": "FTP Anonymous Login Allowed",
+            "flag": "[!] VULN: FTP Anonymous Login Allowed",
+        }
+        findings = run_port_vulnerability_checks("127.0.0.1", 21, timeout=1.5)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["title"], "FTP Anonymous Login Allowed")
+
+        mock_ftp_check.return_value = {"vulnerable": False}
+        findings_safe = run_port_vulnerability_checks("127.0.0.1", 21, timeout=1.5)
+        self.assertEqual(findings_safe, [])
+
+        # Non-port 21 should return empty list
+        non_ftp_findings = run_port_vulnerability_checks("127.0.0.1", 80, timeout=1.5)
+        self.assertEqual(non_ftp_findings, [])
+
+    @patch("core.vuln_checks.check_ftp_anonymous")
+    def test_vulnerability_checker_class(self, mock_ftp_check):
+        from core.vuln_checks import VulnerabilityChecker
+        mock_ftp_check.return_value = {
+            "vulnerable": True,
+            "port": 21,
+            "title": "FTP Anonymous Login Allowed",
+            "flag": "[!] VULN: FTP Anonymous Login Allowed",
+        }
+        checker = VulnerabilityChecker(timeout=3.0)
+        self.assertEqual(checker.timeout, 3.0)
+
+        res = checker.check_ftp_anonymous("10.0.0.2", port=21)
+        self.assertTrue(res["vulnerable"])
+        mock_ftp_check.assert_called_with("10.0.0.2", port=21, timeout=3.0)
+
+        findings = checker.check_port("10.0.0.2", 21)
+        self.assertEqual(len(findings), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
