@@ -1343,6 +1343,41 @@ class TestVulnChecks(unittest.TestCase):
         findings = checker.check_port("10.0.0.2", 21)
         self.assertEqual(len(findings), 1)
 
+    @patch("sys.argv", ["main.py", "-t", "127.0.0.1", "-p", "21", "-Pn", "-q"])
+    @patch("main.is_host_online", return_value=True)
+    @patch("main.scan_ports_concurrent")
+    @patch("main.run_port_vulnerability_checks")
+    def test_main_flags_ftp_vulnerability(
+        self, mock_vuln_checks, mock_scan_concurrent, mock_host_online
+    ):
+        import io
+        from unittest.mock import patch
+        import main
+
+        mock_vuln_checks.return_value = [
+            {
+                "vulnerable": True,
+                "port": 21,
+                "title": "FTP Anonymous Login Allowed",
+                "flag": "[!] VULN: FTP Anonymous Login Allowed",
+            }
+        ]
+
+        def fake_scan(ip, ports, timeout, max_workers, rate_limit_ms, grab_banners, on_port_scanned):
+            on_port_scanned({"port": 21, "state": "OPEN", "service": "FTP", "banner": ""})
+            return [{"port": 21, "state": "OPEN", "service": "FTP", "banner": ""}]
+
+        mock_scan_concurrent.side_effect = fake_scan
+
+        captured_stdout = io.StringIO()
+        with patch("sys.stdout", captured_stdout):
+            main.main()
+
+        output = captured_stdout.getvalue()
+        self.assertIn("21/tcp", output)
+        self.assertIn("[!] VULN: FTP Anonymous Login Allowed", output)
+        self.assertIn("[*] Vulnerabilities  : 1 flagged", output)
+
 
 if __name__ == "__main__":
     unittest.main()
