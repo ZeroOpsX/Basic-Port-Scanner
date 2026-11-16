@@ -40,12 +40,18 @@ from .ssl_inspector import (
     is_ssl_port,
     parse_certificate_dict,
 )
+from .vuln_checks import (
+    VulnerabilityChecker,
+    check_ftp_anonymous,
+    run_port_vulnerability_checks,
+)
 
 __all__ = [
     "PortScanner",
     "AsyncPortScanner",
     "ServiceDetector",
     "SSLInspector",
+    "VulnerabilityChecker",
     "scan_port",
     "async_scan_port",
     "scan_ports_concurrent",
