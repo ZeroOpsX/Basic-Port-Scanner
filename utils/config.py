@@ -166,3 +166,24 @@ COMMON_PORTS_LIST = sorted(list(COMMON_PORTS.keys()))
 
 # Sorted list of exactly the top 100 most common ports
 TOP_100_PORTS_LIST = sorted(list(TOP_100_PORTS.keys()))
+
+# Well-known / Common UDP ports dictionary (Port -> Service Name)
+COMMON_UDP_PORTS = {
+    53: "DNS",
+    67: "DHCP-Server",
+    68: "DHCP-Client",
+    69: "TFTP",
+    123: "NTP",
+    137: "NetBIOS-NS",
+    138: "NetBIOS-DGM",
+    161: "SNMP",
+    162: "SNMP-Trap",
+    500: "ISAKMP",
+    514: "Syslog",
+    520: "RIP",
+    1900: "SSDP",
+    5353: "mDNS",
+}
+
+# Sorted list of common UDP ports for default UDP scanning
+COMMON_UDP_PORTS_LIST = sorted(list(COMMON_UDP_PORTS.keys()))

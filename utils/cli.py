@@ -14,6 +14,7 @@ from typing import List, Optional
 try:
     from .config import (
         COMMON_PORTS_LIST,
+        COMMON_UDP_PORTS_LIST,
         DEFAULT_THREADS,
         DEFAULT_TIMEOUT,
         TOOL_NAME,
@@ -26,9 +27,10 @@ except ImportError:
     DEFAULT_TIMEOUT = 1.5
     DEFAULT_THREADS = 100
     COMMON_PORTS_LIST = [20, 21, 22, 23, 25, 53, 80, 110, 143, 443, 3306, 3389, 8080]
+    COMMON_UDP_PORTS_LIST = [53, 67, 68, 69, 123, 137, 138, 161, 162, 500, 514, 520, 1900, 5353]
     TOP_100_PORTS_LIST = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080, 8443]
 
-CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | -iL FILE | TARGET) [-p PORTS | --common | --top-ports]
+CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | -iL FILE | TARGET) [-sU] [-p PORTS | --common | --top-ports]
                 [--exclude-ports PORTS] [-Pn] [-r] [--async] [-T THREADS] [--timeout TIMEOUT]
                 [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
 
@@ -80,6 +82,9 @@ Examples:
 
   # Exclude specific ports from scan (e.g. skip sensitive ports):
   python main.py -t 192.168.1.1 -p 1-1000 --exclude-ports 80,443,8000-8080
+
+  # UDP port scan for common UDP services (DNS, SNMP, NTP):
+  python main.py -t 8.8.8.8 -sU
 
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
@@ -225,6 +230,13 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Port options
     port_group = parser.add_argument_group("Port Scan Options")
+    port_group.add_argument(
+        "-sU",
+        "--udp",
+        dest="udp_scan",
+        action="store_true",
+        help="Enable UDP port scanning using SOCK_DGRAM for common UDP ports (DNS:53, NTP:123, SNMP:161, etc.)",
+    )
     port_group.add_argument(
         "-p",
         "--ports",
@@ -416,6 +428,9 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
         except ValueError as err:
             print(f"[!] Error parsing ports: {err}", file=sys.stderr)
             sys.exit(2)
+    elif getattr(parsed_args, "udp_scan", False):
+        # Default to common UDP ports when -sU is triggered without explicit -p
+        parsed_args.ports_list = list(COMMON_UDP_PORTS_LIST)
     else:
         # Default standard port range: 1 - 1024
         parsed_args.ports_list = list(range(1, 1025))

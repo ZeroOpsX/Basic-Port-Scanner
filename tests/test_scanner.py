@@ -1379,5 +1379,156 @@ class TestVulnChecks(unittest.TestCase):
         self.assertIn("[*] Vulnerabilities  : 1 flagged", output)
 
 
+class TestUDPScanner(unittest.TestCase):
+    """Tests for core/udp_scanner.py and -sU UDP scanning flag."""
+
+    def test_parse_udp_response_dns(self):
+        from core.udp_scanner import parse_udp_response
+        fake_dns = b"\x13\x37\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00" + b"\x00" * 20
+        summary = parse_udp_response(53, fake_dns)
+        self.assertIn("DNS Response", summary)
+        self.assertIn("NoError", summary)
+
+    def test_parse_udp_response_ntp(self):
+        from core.udp_scanner import parse_udp_response
+        # NTP response: byte 0 has VN/Mode, byte 1 has stratum
+        fake_ntp = bytes([0x1C, 2]) + b"\x00" * 46
+        summary = parse_udp_response(123, fake_ntp)
+        self.assertIn("NTP Server Response", summary)
+        self.assertIn("Stratum 2", summary)
+
+    def test_parse_udp_response_snmp(self):
+        from core.udp_scanner import parse_udp_response
+        fake_snmp = b"\x30\x29\x02\x01\x00\x04\x06public" + b"\x00" * 20
+        summary = parse_udp_response(161, fake_snmp)
+        self.assertIn("SNMP Response", summary)
+
+    @patch("socket.socket")
+    def test_scan_udp_port_open(self, mock_sock_cls):
+        from core.udp_scanner import scan_udp_port
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = b"\x13\x37\x81\x80" + b"\x00" * 12
+        mock_sock_cls.return_value = mock_sock
+
+        res = scan_udp_port("127.0.0.1", 53, timeout=1.0)
+        self.assertEqual(res["port"], 53)
+        self.assertEqual(res["protocol"], "udp")
+        self.assertEqual(res["state"], "OPEN")
+        self.assertEqual(res["service"], "DNS")
+        self.assertIn("DNS Response", res["banner"])
+        mock_sock.connect.assert_called_once_with(("127.0.0.1", 53))
+        mock_sock.send.assert_called_once()
+        mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_scan_udp_port_closed(self, mock_sock_cls):
+        from core.udp_scanner import scan_udp_port
+        mock_sock = MagicMock()
+        mock_sock.recv.side_effect = ConnectionResetError(10054, "Connection reset")
+        mock_sock_cls.return_value = mock_sock
+
+        res = scan_udp_port("127.0.0.1", 161, timeout=1.0)
+        self.assertEqual(res["port"], 161)
+        self.assertEqual(res["state"], "CLOSED")
+        self.assertEqual(res["service"], "SNMP")
+
+    @patch("socket.socket")
+    def test_scan_udp_port_timeout_open_filtered(self, mock_sock_cls):
+        from core.udp_scanner import scan_udp_port
+        mock_sock = MagicMock()
+        mock_sock.recv.side_effect = socket.timeout("timed out")
+        mock_sock_cls.return_value = mock_sock
+
+        res = scan_udp_port("127.0.0.1", 123, timeout=1.0)
+        self.assertEqual(res["port"], 123)
+        self.assertEqual(res["state"], "OPEN|FILTERED")
+        self.assertEqual(res["service"], "NTP")
+
+    @patch("core.udp_scanner.scan_udp_port")
+    def test_scan_udp_ports_concurrent(self, mock_scan):
+        from core.udp_scanner import scan_udp_ports_concurrent
+
+        def fake_scan(ip, port, timeout):
+            if port == 53:
+                return {"port": 53, "protocol": "udp", "state": "OPEN", "service": "DNS", "banner": "DNS Response"}
+            return {"port": port, "protocol": "udp", "state": "CLOSED", "service": "Unknown", "banner": ""}
+
+        mock_scan.side_effect = fake_scan
+        discovered = []
+        results = scan_udp_ports_concurrent(
+            ip="127.0.0.1",
+            ports=[53, 123],
+            timeout=1.0,
+            max_workers=2,
+            on_port_scanned=lambda r: discovered.append(r),
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["port"], 53)
+        self.assertEqual(len(discovered), 1)
+
+    @patch("core.udp_scanner.scan_udp_ports_concurrent")
+    def test_udp_scanner_class(self, mock_concurrent):
+        from core.udp_scanner import UDPScanner
+        mock_concurrent.return_value = [
+            {"port": 161, "protocol": "udp", "state": "OPEN", "service": "SNMP"}
+        ]
+        scanner = UDPScanner(target="127.0.0.1", timeout=2.0, max_workers=5)
+        self.assertEqual(scanner.target, "127.0.0.1")
+        self.assertEqual(scanner.timeout, 2.0)
+
+        results = scanner.scan_ports([161])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["port"], 161)
+
+    def test_cli_su_flag_parsing(self):
+        from utils.cli import parse_arguments
+        from utils.config import COMMON_UDP_PORTS_LIST
+
+        # Default UDP ports when -p is omitted
+        args1 = parse_arguments(["-t", "127.0.0.1", "-sU"])
+        self.assertTrue(args1.udp_scan)
+        self.assertEqual(args1.ports_list, COMMON_UDP_PORTS_LIST)
+
+        # Custom ports with -sU
+        args2 = parse_arguments(["-t", "127.0.0.1", "-sU", "-p", "53,123,161"])
+        self.assertTrue(args2.udp_scan)
+        self.assertEqual(args2.ports_list, [53, 123, 161])
+
+    @patch("sys.argv", ["main.py", "-t", "8.8.8.8", "-sU", "-p", "53,123,161", "-Pn", "-q"])
+    @patch("main.is_host_online", return_value=True)
+    @patch("main.scan_udp_ports_concurrent")
+    def test_main_udp_scan_execution(self, mock_udp_scan, mock_host_online):
+        import io
+        from unittest.mock import patch
+        import main
+
+        def fake_scan(ip, ports, timeout, max_workers, rate_limit_ms, include_open_filtered, on_port_scanned):
+            on_port_scanned({
+                "port": 53,
+                "protocol": "udp",
+                "state": "OPEN",
+                "service": "DNS",
+                "banner": "DNS Response (NoError)",
+            })
+            return [{
+                "port": 53,
+                "protocol": "udp",
+                "state": "OPEN",
+                "service": "DNS",
+                "banner": "DNS Response (NoError)",
+            }]
+
+        mock_udp_scan.side_effect = fake_scan
+
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            main.main()
+
+        out = captured.getvalue()
+        self.assertIn("53/udp", out)
+        self.assertIn("DNS", out)
+        self.assertIn("Response/Banner: DNS Response", out)
+
+
 if __name__ == "__main__":
     unittest.main()

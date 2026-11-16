@@ -14,6 +14,7 @@ from core.async_scanner import run_async_scan
 from core.constants import COMMON_PORTS
 from core.host_discovery import is_host_online
 from core.scanner import scan_port, scan_ports_concurrent
+from core.udp_scanner import scan_udp_ports_concurrent
 from core.vuln_checks import check_ftp_anonymous, run_port_vulnerability_checks
 from utils.banner import print_banner
 from utils.cli import parse_arguments
@@ -174,7 +175,10 @@ def main():
         if getattr(args, "exclude_ports", None)
         else ""
     )
-    if args.use_async:
+    if getattr(args, "udp_scan", False):
+        concurrency = min(args.threads, 30)
+        engine_msg = f"UDP engine (SOCK_DGRAM, {concurrency} workers)"
+    elif args.use_async:
         concurrency = args.threads if args.threads != 100 else 500
         engine_msg = f"asyncio engine (Concurrency: {concurrency})"
     else:
@@ -201,21 +205,26 @@ def main():
 
     def on_port_discovered(port_entry: dict):
         scan_context["open_ports"].append(port_entry)
-        port_label = f"{port_entry['port']}/tcp"
+        proto = port_entry.get("protocol") or ("udp" if getattr(args, "udp_scan", False) else "tcp")
+        port_label = f"{port_entry['port']}/{proto}"
         if multi_host:
             host_label = port_entry.get("host", "")
             print(f"{host_label:<18}{port_label:<12}{'OPEN':<10}{port_entry['service']:<15}")
         else:
             print(f"{port_label:<12}{'OPEN':<10}{port_entry['service']:<15}")
 
+        if port_entry.get("banner"):
+            print(f"  └── Response/Banner: {port_entry['banner']}")
+
         # Check for service vulnerabilities (e.g., FTP anonymous login on port 21)
-        host_ip = port_entry.get("host") or (targets[0][1] if len(targets) == 1 else args.target)
-        vulns = run_port_vulnerability_checks(host_ip, port_entry["port"], timeout=args.timeout)
-        if vulns:
-            port_entry["vulns"] = vulns
-            for vuln in vulns:
-                flag = vuln.get("flag") or f"[!] VULN: {vuln.get('title')}"
-                print(f"  └── {flag}")
+        if proto == "tcp":
+            host_ip = port_entry.get("host") or (targets[0][1] if len(targets) == 1 else args.target)
+            vulns = run_port_vulnerability_checks(host_ip, port_entry["port"], timeout=args.timeout)
+            if vulns:
+                port_entry["vulns"] = vulns
+                for vuln in vulns:
+                    flag = vuln.get("flag") or f"[!] VULN: {vuln.get('title')}"
+                    print(f"  └── {flag}")
 
     # 5. Execute Scan across resolved target hosts
     for canonical_target, target_ip in targets:
@@ -236,7 +245,17 @@ def main():
 
         cb = make_port_callback(target_ip)
 
-        if args.use_async:
+        if getattr(args, "udp_scan", False):
+            scan_udp_ports_concurrent(
+                ip=target_ip,
+                ports=ports,
+                timeout=args.timeout,
+                max_workers=min(args.threads, 30),
+                rate_limit_ms=args.rate_limit,
+                include_open_filtered=False,
+                on_port_scanned=cb,
+            )
+        elif args.use_async:
             run_async_scan(
                 ip=target_ip,
                 ports=ports,

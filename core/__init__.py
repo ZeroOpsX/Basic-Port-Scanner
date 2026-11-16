@@ -40,6 +40,11 @@ from .ssl_inspector import (
     is_ssl_port,
     parse_certificate_dict,
 )
+from .udp_scanner import (
+    UDPScanner,
+    scan_udp_port,
+    scan_udp_ports_concurrent,
+)
 from .vuln_checks import (
     VulnerabilityChecker,
     check_ftp_anonymous,
@@ -51,12 +56,15 @@ __all__ = [
     "AsyncPortScanner",
     "ServiceDetector",
     "SSLInspector",
+    "UDPScanner",
     "VulnerabilityChecker",
     "scan_port",
     "async_scan_port",
     "scan_ports_concurrent",
     "scan_ports_async",
     "run_async_scan",
+    "scan_udp_port",
+    "scan_udp_ports_concurrent",
     "create_port_queue",
     "grab_banner",
     "async_grab_banner",

@@ -3,6 +3,8 @@
 from utils.config import (
     COMMON_PORTS,
     COMMON_PORTS_LIST,
+    COMMON_UDP_PORTS,
+    COMMON_UDP_PORTS_LIST,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_THREADS,
     DEFAULT_TIMEOUT,
@@ -15,6 +17,8 @@ from utils.config import (
 __all__ = [
     "COMMON_PORTS",
     "COMMON_PORTS_LIST",
+    "COMMON_UDP_PORTS",
+    "COMMON_UDP_PORTS_LIST",
     "TOP_100_PORTS",
     "TOP_100_PORTS_LIST",
     "DEFAULT_TIMEOUT",
