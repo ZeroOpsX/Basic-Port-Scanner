@@ -6,6 +6,7 @@ with fallback to common cybersecurity port registries and caching.
 
 from functools import lru_cache
 import socket
+import ssl
 from typing import Dict, Iterable, Optional
 
 try:
