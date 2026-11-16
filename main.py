@@ -17,6 +17,8 @@ from core.scanner import scan_port, scan_ports_concurrent
 from core.syn_scanner import check_admin_privileges, syn_scan_ports
 from core.udp_scanner import scan_udp_ports_concurrent
 from core.vuln_checks import check_ftp_anonymous, run_port_vulnerability_checks
+from output.display import print_port_result, print_summary_table
+from output.exporter import export_csv, export_html, export_json
 from utils.banner import print_banner
 from utils.cli import parse_arguments
 from utils.helpers import export_results
