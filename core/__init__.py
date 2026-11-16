@@ -20,10 +20,13 @@ from .scanner import (
     scan_ports_concurrent,
 )
 from .service_detector import (
+    HTTP_PORTS,
     ServiceDetector,
     detect_service,
+    extract_http_headers,
     get_iana_service_name,
     get_service_name,
+    grab_http_headers,
     map_ports_to_services,
 )
 
@@ -46,6 +49,9 @@ __all__ = [
     "get_service_name",
     "detect_service",
     "map_ports_to_services",
+    "extract_http_headers",
+    "grab_http_headers",
+    "HTTP_PORTS",
     "PortStatus",
     "PORT_OPEN",
     "PORT_CLOSED",

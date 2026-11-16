@@ -318,3 +318,9 @@ class ServiceDetector:
         Connects to open port and retrieves response banner.
         """
         return grab_banner(ip, port, timeout=timeout)
+
+    def grab_http_headers(self, ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> Dict[str, str]:
+        """
+        Sends HTTP HEAD request and extracts Server and X-Powered-By headers.
+        """
+        return grab_http_headers(ip, port, timeout=timeout)
