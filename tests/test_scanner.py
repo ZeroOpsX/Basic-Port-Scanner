@@ -1,10 +1,13 @@
 """Unit tests for NetPulse core logic and helper utilities."""
 
+import json
 import os
 import socket
 import ssl
 import tempfile
 import unittest
+import urllib.error
+import urllib.request
 from unittest.mock import MagicMock, patch
 
 from core.constants import COMMON_PORTS
@@ -1460,6 +1463,186 @@ class TestVulnChecks(unittest.TestCase):
         self.assertIn("21/tcp", output)
         self.assertIn("[!] VULN: FTP Anonymous Login Allowed", output)
         self.assertIn("[*] Vulnerabilities  : 1 flagged", output)
+
+    def test_parse_service_banner(self):
+        from core.vuln_checks import parse_service_banner
+
+        # Apache 2.4.49
+        p1 = parse_service_banner("Apache 2.4.49")
+        self.assertEqual(p1["product"], "http_server")
+        self.assertEqual(p1["vendor"], "apache")
+        self.assertEqual(p1["version"], "2.4.49")
+
+        # nginx/1.18.0
+        p2 = parse_service_banner("nginx/1.18.0")
+        self.assertEqual(p2["product"], "nginx")
+        self.assertEqual(p2["vendor"], "nginx")
+        self.assertEqual(p2["version"], "1.18.0")
+
+        # OpenSSH
+        p3 = parse_service_banner("OpenSSH_8.2p1 Ubuntu-4ubuntu0.5")
+        self.assertEqual(p3["product"], "openssh")
+        self.assertEqual(p3["vendor"], "openbsd")
+        self.assertEqual(p3["version"], "8.2p1")
+
+        # vsftpd
+        p4 = parse_service_banner("vsftpd 3.0.3")
+        self.assertEqual(p4["product"], "vsftpd")
+        self.assertEqual(p4["version"], "3.0.3")
+
+        # Invalid / empty
+        p_empty = parse_service_banner("")
+        self.assertIsNone(p_empty["product"])
+
+    @patch("urllib.request.urlopen")
+    def test_query_circl_cve_v5(self, mock_urlopen):
+        import io
+        from core.vuln_checks import query_circl_cve
+
+        fake_json = {
+            "results": {
+                "nvd": [
+                    [
+                        "cve-2021-41773",
+                        {
+                            "cveMetadata": {
+                                "cveId": "CVE-2021-41773",
+                                "datePublished": "2021-10-05T00:00:00Z",
+                            },
+                            "containers": {
+                                "cna": {
+                                    "title": "Apache HTTP Server Path Traversal and RCE",
+                                    "descriptions": [
+                                        {"value": "A flaw was found in a change made to path normalization in Apache HTTP Server 2.4.49."}
+                                    ],
+                                },
+                                "adp": [
+                                    {
+                                        "metrics": [
+                                            {"cvssV3_1": {"baseScore": 7.5, "baseSeverity": "HIGH"}}
+                                        ]
+                                    }
+                                ],
+                            },
+                        },
+                    ]
+                ]
+            }
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(fake_json).encode("utf-8")
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        results = query_circl_cve("apache", "http_server", version="2.4.49", limit=5)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "CVE-2021-41773")
+        self.assertEqual(results[0]["cvss"], 7.5)
+        self.assertEqual(results[0]["severity"], "HIGH")
+        self.assertIn("CVE-2021-41773", results[0]["url"])
+
+    @patch("urllib.request.urlopen")
+    def test_query_circl_cve_legacy_format(self, mock_urlopen):
+        from core.vuln_checks import query_circl_cve
+
+        fake_list = [
+            {
+                "id": "CVE-2021-42013",
+                "summary": "Path traversal in Apache 2.4.49 and 2.4.50",
+                "cvss": 9.8,
+                "Published": "2021-10-07T00:00:00",
+            }
+        ]
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(fake_list).encode("utf-8")
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        results = query_circl_cve("apache", "http_server", version="2.4.49", limit=5)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "CVE-2021-42013")
+        self.assertEqual(results[0]["cvss"], 9.8)
+        self.assertEqual(results[0]["severity"], "HIGH")
+
+    @patch("urllib.request.urlopen")
+    def test_query_nvd_cve(self, mock_urlopen):
+        from core.vuln_checks import query_nvd_cve
+
+        fake_nvd = {
+            "vulnerabilities": [
+                {
+                    "cve": {
+                        "id": "CVE-2021-41773",
+                        "published": "2021-10-05T12:00:00.000",
+                        "descriptions": [{"lang": "en", "value": "Flaw in Apache HTTP Server 2.4.49"}],
+                        "metrics": {
+                            "cvssMetricV31": [{"cvssData": {"baseScore": 7.5, "baseSeverity": "HIGH"}}]
+                        },
+                    }
+                }
+            ]
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps(fake_nvd).encode("utf-8")
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        results = query_nvd_cve("Apache 2.4.49", limit=3)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "CVE-2021-41773")
+        self.assertEqual(results[0]["cvss"], 7.5)
+
+    @patch("core.vuln_checks.query_circl_cve")
+    def test_query_cve_by_banner_circl(self, mock_circl):
+        from core.vuln_checks import query_cve_by_banner
+
+        mock_circl.return_value = [
+            {"id": "CVE-2021-41773", "title": "Apache RCE", "cvss": 7.5}
+        ]
+        results = query_cve_by_banner("Apache 2.4.49", api_provider="circl")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "CVE-2021-41773")
+        mock_circl.assert_called_once()
+
+    @patch("core.vuln_checks.query_nvd_cve")
+    def test_query_cve_by_banner_nvd(self, mock_nvd):
+        from core.vuln_checks import query_cve_by_banner
+
+        mock_nvd.return_value = [
+            {"id": "CVE-2021-41773", "title": "Apache Path Traversal", "cvss": 7.5}
+        ]
+        results = query_cve_by_banner("Apache 2.4.49", api_provider="nvd")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "CVE-2021-41773")
+        mock_nvd.assert_called_once()
+
+    def test_query_cve_by_banner_invalid(self):
+        from core.vuln_checks import query_cve_by_banner
+        self.assertEqual(query_cve_by_banner(""), [])
+        self.assertEqual(query_cve_by_banner("Unrecognized Unknown Service 99.9"), [])
+
+    @patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Network down"))
+    def test_query_cve_network_error_graceful(self, mock_urlopen):
+        from core.vuln_checks import query_circl_cve, query_nvd_cve
+        self.assertEqual(query_circl_cve("apache", "http_server"), [])
+        self.assertEqual(query_nvd_cve("apache"), [])
+
+    @patch("core.vuln_checks.query_cve_by_banner")
+    def test_vulnerability_checker_lookup_banner_cves(self, mock_query):
+        from core.vuln_checks import VulnerabilityChecker
+        mock_query.return_value = [{"id": "CVE-2021-41773"}]
+        checker = VulnerabilityChecker(timeout=4.0)
+        res = checker.lookup_banner_cves("Apache 2.4.49")
+        self.assertEqual(len(res), 1)
+        mock_query.assert_called_with(
+            banner="Apache 2.4.49",
+            api_provider="circl",
+            limit=5,
+            timeout=4.0,
+        )
 
 
 class TestUDPScanner(unittest.TestCase):

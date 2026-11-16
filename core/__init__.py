@@ -63,6 +63,10 @@ from .udp_scanner import (
 from .vuln_checks import (
     VulnerabilityChecker,
     check_ftp_anonymous,
+    parse_service_banner,
+    query_circl_cve,
+    query_cve_by_banner,
+    query_nvd_cve,
     run_port_vulnerability_checks,
 )
 
@@ -112,6 +116,10 @@ __all__ = [
     "parse_certificate_dict",
     "check_ftp_anonymous",
     "run_port_vulnerability_checks",
+    "parse_service_banner",
+    "query_cve_by_banner",
+    "query_circl_cve",
+    "query_nvd_cve",
     "PortStatus",
     "PORT_OPEN",
     "PORT_CLOSED",
