@@ -10,7 +10,6 @@ import errno
 import logging
 import queue
 import socket
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,7 +19,6 @@ try:
     from .constants import (
         COMMON_UDP_PORTS,
         COMMON_UDP_PORTS_LIST,
-        DEFAULT_THREADS,
         DEFAULT_TIMEOUT,
     )
 except ImportError:
@@ -28,7 +26,6 @@ except ImportError:
         from utils.config import (
             COMMON_UDP_PORTS,
             COMMON_UDP_PORTS_LIST,
-            DEFAULT_THREADS,
             DEFAULT_TIMEOUT,
         )
     except ImportError:

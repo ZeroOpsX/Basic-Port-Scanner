@@ -264,10 +264,3 @@ def get_host_os_guess(target: str, timeout: float = 2.0) -> Optional[Dict[str, A
         return guess_os_from_ttl(ttl)
     return None
 
-
-if __name__ == "__main__":
-    test_targets = ["127.0.0.1", "google.com", "192.0.2.1"]
-    for t in test_targets:
-        online = is_host_online(t, timeout=1.0)
-        status_text = "ONLINE" if online else "OFFLINE/UNREACHABLE"
-        print(f"Target: {t:<20} Status: {status_text}")

@@ -389,7 +389,7 @@ def check_ftp_anonymous(
 
         return {
             "vulnerable": True,
-            "allowed": True,
+            "allowed": allowed,
             "port": port,
             "service": "FTP",
             "vuln_id": "FTP-ANON-LOGIN",

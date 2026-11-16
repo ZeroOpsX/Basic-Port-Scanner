@@ -6,7 +6,6 @@ supporting concurrency limits via asyncio.Semaphore and rate limiting.
 """
 
 import asyncio
-import errno
 import logging
 import socket
 from typing import Callable, Dict, List, Optional
@@ -14,7 +13,6 @@ from typing import Callable, Dict, List, Optional
 from .constants import COMMON_PORTS, DEFAULT_TIMEOUT
 from .scanner import (
     CLOSED_ERRNOS,
-    FILTERED_ERRNOS,
     PortStatus,
 )
 

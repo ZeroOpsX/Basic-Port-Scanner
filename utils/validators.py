@@ -279,9 +279,3 @@ def resolve_targets(target: str) -> List[Tuple[str, str]]:
     # 2. Single IPv4 address or domain name
     return [resolve_target(cleaned)]
 
-
-if __name__ == "__main__":
-    domains_to_test = ["localhost", "example.com", "nonexistent-domain-404-xyz.com"]
-    for d in domains_to_test:
-        ip = resolve_domain(d)
-        print(f"Domain: {d:<35} -> Resolved IPv4: {ip}")

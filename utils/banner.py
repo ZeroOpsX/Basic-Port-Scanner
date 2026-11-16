@@ -2,8 +2,6 @@
 ASCII art banner and ethical use disclaimer for NetPulse Port Scanner.
 """
 
-from typing import Optional
-
 try:
     from colorama import Fore, Style, init
     init(autoreset=True)
@@ -30,11 +28,10 @@ except ImportError:
     DIM = ""
 
 try:
-    from .config import AUTHOR, TOOL_NAME, VERSION
+    from .config import TOOL_NAME, VERSION
 except ImportError:
     TOOL_NAME = "NetPulse"
     VERSION = "1.0.0"
-    AUTHOR = "Professional Security Toolkit"
 
 # Cybersecurity / Pulse themed ASCII logo
 BANNER_ART = r"""

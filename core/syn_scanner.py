@@ -9,26 +9,23 @@ raw socket frames.
 """
 
 import ctypes
-import errno
 import logging
 import os
 import platform
 import queue
 import random
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from .constants import COMMON_PORTS, DEFAULT_THREADS, DEFAULT_TIMEOUT
+    from .constants import COMMON_PORTS, DEFAULT_TIMEOUT
 except ImportError:
     try:
-        from utils.config import COMMON_PORTS, DEFAULT_THREADS, DEFAULT_TIMEOUT
+        from utils.config import COMMON_PORTS, DEFAULT_TIMEOUT
     except ImportError:
         DEFAULT_TIMEOUT = 1.5
-        DEFAULT_THREADS = 100
         COMMON_PORTS = {21: "FTP", 22: "SSH", 80: "HTTP", 443: "HTTPS"}
 
 try:

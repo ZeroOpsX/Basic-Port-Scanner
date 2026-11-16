@@ -8,7 +8,6 @@ Configures dual logging:
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 try:
     from colorama import Fore, Style, init

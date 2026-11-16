@@ -10,7 +10,7 @@ import os
 import socket
 import ssl
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 try:
     from .constants import DEFAULT_TIMEOUT
