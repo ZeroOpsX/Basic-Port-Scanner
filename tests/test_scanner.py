@@ -477,6 +477,63 @@ class TestValidators(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolve_domain_to_ipv4("")
 
+    def test_is_valid_cidr(self):
+        from utils.validators import is_valid_cidr
+        self.assertTrue(is_valid_cidr("192.168.1.0/24"))
+        self.assertTrue(is_valid_cidr("10.0.0.0/16"))
+        self.assertTrue(is_valid_cidr("172.16.1.5/30"))
+        self.assertTrue(is_valid_cidr("192.168.1.1/32"))
+        self.assertTrue(is_valid_cidr(" 192.168.1.0/24 "))
+
+        self.assertFalse(is_valid_cidr("192.168.1.1"))
+        self.assertFalse(is_valid_cidr("192.168.1.0/35"))
+        self.assertFalse(is_valid_cidr("invalid/24"))
+        self.assertFalse(is_valid_cidr("2001:db8::/32"))
+        self.assertFalse(is_valid_cidr(""))
+        self.assertFalse(is_valid_cidr(None))
+
+    def test_parse_cidr(self):
+        from utils.validators import parse_cidr
+        # Test /30
+        hosts_30 = parse_cidr("192.168.1.0/30")
+        self.assertEqual(hosts_30, ["192.168.1.1", "192.168.1.2"])
+
+        # Test /24
+        hosts_24 = parse_cidr("192.168.1.0/24")
+        self.assertEqual(len(hosts_24), 254)
+        self.assertEqual(hosts_24[0], "192.168.1.1")
+        self.assertEqual(hosts_24[-1], "192.168.1.254")
+
+        # Test /32 host route
+        hosts_32 = parse_cidr("10.0.0.1/32")
+        self.assertEqual(hosts_32, ["10.0.0.1"])
+
+        # Test invalid inputs
+        with self.assertRaises(ValueError):
+            parse_cidr("not-a-cidr")
+        with self.assertRaises(ValueError):
+            parse_cidr("192.168.1.0/35")
+        with self.assertRaises(ValueError):
+            parse_cidr("0.0.0.0/0")  # Prefix < 8 rejected
+
+    def test_resolve_targets(self):
+        from utils.validators import resolve_targets
+
+        # Test CIDR
+        cidr_targets = resolve_targets("192.168.1.0/30")
+        self.assertEqual(
+            cidr_targets,
+            [("192.168.1.1", "192.168.1.1"), ("192.168.1.2", "192.168.1.2")],
+        )
+
+        # Test single IP
+        single_ip = resolve_targets("127.0.0.1")
+        self.assertEqual(single_ip, [("127.0.0.1", "127.0.0.1")])
+
+        # Test invalid target
+        with self.assertRaises(ValueError):
+            resolve_targets("this-target-does-not-exist.invalid-domain-test")
+
 
 class TestSignalHandler(unittest.TestCase):
     """Tests for signal_handler in main.py."""

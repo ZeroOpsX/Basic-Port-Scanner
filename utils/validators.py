@@ -7,7 +7,7 @@ and `socket.gethostbyname()` for domain resolution with comprehensive error hand
 import ipaddress
 import re
 import socket
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 
 def is_valid_ipv4(target: str) -> bool:
@@ -62,6 +62,72 @@ def validate_ipv4(target: str) -> str:
         return str(ip)
     except (ipaddress.AddressValueError, ValueError) as err:
         raise ValueError(f"Invalid IPv4 address '{target}': {err}")
+
+
+def is_valid_cidr(target: str) -> bool:
+    """
+    Validates whether the provided string is a valid IPv4 CIDR network specification.
+
+    Args:
+        target: Target string to validate (e.g., '192.168.1.0/24', '10.0.0.0/16').
+
+    Returns:
+        True if target is a valid IPv4 CIDR string, False otherwise.
+    """
+    if not target or not isinstance(target, str):
+        return False
+
+    cleaned = target.strip()
+    if "/" not in cleaned:
+        return False
+
+    try:
+        network = ipaddress.ip_network(cleaned, strict=False)
+        return isinstance(network, ipaddress.IPv4Network)
+    except (ValueError, TypeError):
+        return False
+
+
+def parse_cidr(cidr_str: str) -> List[str]:
+    """
+    Parses an IPv4 CIDR network string into a list of host IPv4 address strings using ipaddress.ip_network.
+
+    For subnets with prefix <= 30, returns usable host addresses (omitting network and broadcast).
+    For /31 (RFC 3021 point-to-point) and /32 (host route), returns all assigned addresses.
+
+    Args:
+        cidr_str: CIDR notation string (e.g., '192.168.1.0/24', '10.0.0.1/30').
+
+    Returns:
+        List of string IPv4 addresses in the network range.
+
+    Raises:
+        ValueError: If CIDR string is malformed, not IPv4, or has an unreasonably broad prefix (< /8).
+    """
+    if not cidr_str or not isinstance(cidr_str, str):
+        raise ValueError("CIDR input must be a non-empty string.")
+
+    cleaned = cidr_str.strip()
+    if "/" not in cleaned:
+        raise ValueError(f"Target '{cidr_str}' is not in CIDR notation (expected format: 'IP/prefix', e.g. 192.168.1.0/24).")
+
+    try:
+        network = ipaddress.ip_network(cleaned, strict=False)
+    except ValueError as err:
+        raise ValueError(f"Invalid CIDR network format '{cidr_str}': {err}") from err
+
+    if not isinstance(network, ipaddress.IPv4Network):
+        raise ValueError(f"Only IPv4 CIDR networks are supported (received: '{cidr_str}').")
+
+    if network.prefixlen < 8:
+        raise ValueError(f"CIDR prefix /{network.prefixlen} is too broad. Minimum allowed prefix is /8.")
+
+    hosts = [str(ip) for ip in network.hosts()]
+    if not hosts:
+        # Fallback for /32 host route
+        hosts = [str(ip) for ip in network]
+
+    return hosts
 
 
 def resolve_domain(domain: str) -> Optional[str]:
@@ -151,13 +217,13 @@ def resolve_target(target: str) -> Tuple[str, str]:
     Validates and resolves the target into (canonical_name, ipv4_address).
 
     Args:
-        target: IPv4 address or domain name.
+        target: IPv4 address, CIDR range, or domain name.
 
     Returns:
         Tuple of (target_name, resolved_ipv4_address).
 
     Raises:
-        ValueError: If the target is neither a valid IPv4 address nor a resolvable hostname.
+        ValueError: If the target is neither a valid IPv4/CIDR nor a resolvable hostname.
     """
     if not target or not isinstance(target, str):
         raise ValueError("Target cannot be empty.")
@@ -168,14 +234,50 @@ def resolve_target(target: str) -> Tuple[str, str]:
     if is_valid_ipv4(cleaned):
         return cleaned, cleaned
 
-    # 2. Domain / Hostname resolution
+    # 2. CIDR Range fallback for single target resolver
+    if is_valid_cidr(cleaned):
+        hosts = parse_cidr(cleaned)
+        if hosts:
+            return cleaned, hosts[0]
+
+    # 3. Domain / Hostname resolution
     resolved_ip = resolve_domain(cleaned)
     if resolved_ip:
         return cleaned, resolved_ip
 
     raise ValueError(
-        f"Unable to resolve target '{cleaned}': Target is not a valid IPv4 address and domain does not exist."
+        f"Unable to resolve target '{cleaned}': Target is not a valid IPv4 address/CIDR range and domain does not exist."
     )
+
+
+def resolve_targets(target: str) -> List[Tuple[str, str]]:
+    """
+    Validates and resolves a target specification, which may be a CIDR range
+    (e.g., '192.168.1.0/24'), a single IPv4 address, or a resolvable domain name.
+
+    Args:
+        target: Target specification string.
+
+    Returns:
+        List of (canonical_name, resolved_ipv4_address) tuples for all hosts to be scanned.
+
+    Raises:
+        ValueError: If target is empty, malformed, or unresolvable.
+    """
+    if not target or not isinstance(target, str):
+        raise ValueError("Target cannot be empty.")
+
+    cleaned = target.strip()
+
+    # 1. CIDR Network range
+    if is_valid_cidr(cleaned):
+        hosts = parse_cidr(cleaned)
+        if not hosts:
+            raise ValueError(f"No usable hosts found in CIDR range '{cleaned}'.")
+        return [(ip, ip) for ip in hosts]
+
+    # 2. Single IPv4 address or domain name
+    return [resolve_target(cleaned)]
 
 
 if __name__ == "__main__":

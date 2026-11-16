@@ -69,6 +69,9 @@ Examples:
   # Ultra-fast asynchronous scan using asyncio:
   python main.py -t 192.168.1.1 -p 1-10000 --async
 
+  # Scan a CIDR subnet range across multiple hosts:
+  python main.py -t 192.168.1.0/24 -p 80,443 --async
+
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
 """
@@ -154,7 +157,7 @@ def create_parser() -> argparse.ArgumentParser:
         dest="target_flag",
         type=str,
         default=None,
-        help="Target IP address or domain name (e.g. 192.168.1.1, scanme.nmap.org)",
+        help="Target IP address, CIDR range (e.g. 192.168.1.0/24), or domain name (e.g. scanme.nmap.org)",
     )
     target_group.add_argument(
         "positional_target",
