@@ -9,12 +9,13 @@ import socket
 from typing import Dict, Iterable, Optional
 
 try:
-    from .constants import COMMON_PORTS
+    from .constants import COMMON_PORTS, DEFAULT_TIMEOUT
 except ImportError:
     try:
-        from utils.config import COMMON_PORTS
+        from utils.config import COMMON_PORTS, DEFAULT_TIMEOUT
     except ImportError:
         COMMON_PORTS = {}
+        DEFAULT_TIMEOUT = 1.5
 
 
 @lru_cache(maxsize=1024)
@@ -110,6 +111,52 @@ def map_ports_to_services(
     return {port: get_service_name(port, protocol) for port in ports}
 
 
+def grab_banner(
+    ip: str,
+    port: int,
+    timeout: float = DEFAULT_TIMEOUT,
+    probe: bytes = b"\r\n",
+) -> str:
+    """
+    Connects to an open TCP port, sends a dummy byte/newline, and reads
+    up to 1024 bytes of the response banner.
+
+    Args:
+        ip: Target host IP address or hostname.
+        port: TCP port number (1-65535).
+        timeout: Socket timeout in seconds (default: 1.5s).
+        probe: Payload byte/newline to send to elicit banner response (default: b"\\r\\n").
+
+    Returns:
+        Decoded response banner string (up to 1024 bytes), or an empty string on error/timeout.
+    """
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((ip, port))
+
+        # Send a dummy byte/newline to elicit response banner
+        try:
+            sock.sendall(probe)
+        except (socket.error, OSError):
+            pass
+
+        data = sock.recv(1024)
+        if not data:
+            return ""
+
+        return data.decode("utf-8", errors="ignore").strip()
+    except (socket.timeout, socket.error, OSError, KeyboardInterrupt):
+        return ""
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
 class ServiceDetector:
     """
     Service Detection Engine.
@@ -145,3 +192,9 @@ class ServiceDetector:
         Maps a collection of ports to their service names.
         """
         return {port: self.get_service(port) for port in ports}
+
+    def grab_banner(self, ip: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> str:
+        """
+        Connects to open port and retrieves response banner.
+        """
+        return grab_banner(ip, port, timeout=timeout)

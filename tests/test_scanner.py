@@ -916,6 +916,50 @@ class TestServiceDetector(unittest.TestCase):
         finally:
             get_iana_service_name.cache_clear()
 
+    @patch("socket.socket")
+    def test_grab_banner_success(self, mock_socket_cls):
+        from core.service_detector import grab_banner
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = b"SSH-2.0-OpenSSH_8.9p1\r\n"
+        mock_socket_cls.return_value = mock_sock
+
+        banner = grab_banner("127.0.0.1", 22, timeout=1.0)
+        self.assertEqual(banner, "SSH-2.0-OpenSSH_8.9p1")
+        mock_sock.connect.assert_called_once_with(("127.0.0.1", 22))
+        mock_sock.sendall.assert_called_once_with(b"\r\n")
+        mock_sock.recv.assert_called_once_with(1024)
+        mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_grab_banner_empty_response(self, mock_socket_cls):
+        from core.service_detector import grab_banner
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = b""
+        mock_socket_cls.return_value = mock_sock
+
+        banner = grab_banner("127.0.0.1", 80, timeout=1.0)
+        self.assertEqual(banner, "")
+        mock_sock.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_grab_banner_timeout_exception(self, mock_socket_cls):
+        from core.service_detector import grab_banner
+        mock_sock = MagicMock()
+        mock_sock.connect.side_effect = socket.timeout("Timed out")
+        mock_socket_cls.return_value = mock_sock
+
+        banner = grab_banner("127.0.0.1", 443, timeout=1.0)
+        self.assertEqual(banner, "")
+        mock_sock.close.assert_called_once()
+
+    @patch("core.service_detector.grab_banner", return_value="HTTP/1.1 200 OK")
+    def test_service_detector_grab_banner_delegation(self, mock_gb):
+        from core.service_detector import ServiceDetector
+        detector = ServiceDetector()
+        res = detector.grab_banner("127.0.0.1", 80)
+        self.assertEqual(res, "HTTP/1.1 200 OK")
+        mock_gb.assert_called_once_with("127.0.0.1", 80, timeout=1.5)
+
 
 if __name__ == "__main__":
     unittest.main()
