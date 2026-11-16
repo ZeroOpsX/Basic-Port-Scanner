@@ -10,6 +10,7 @@ import sys
 import time
 from typing import Any, Dict
 
+from core.async_scanner import run_async_scan
 from core.constants import COMMON_PORTS
 from core.host_discovery import is_host_online
 from core.scanner import scan_port, scan_ports_concurrent
@@ -167,8 +168,15 @@ def main():
     logger.info(f"Scan Started at: {start_time_str}")
     rate_limit_msg = f" | Rate Limit: {args.rate_limit}ms" if args.rate_limit > 0 else ""
     randomize_msg = " | Order: Randomized" if args.randomize else ""
+    if args.use_async:
+        concurrency = args.threads if args.threads != 100 else 500
+        engine_msg = f"asyncio engine (Concurrency: {concurrency})"
+    else:
+        concurrency = args.threads
+        engine_msg = f"{args.threads} worker threads"
+
     logger.info(
-        f"Initiating multi-threaded scan on {len(ports)} port(s) with {args.threads} worker threads (Timeout: {args.timeout}s{rate_limit_msg}{randomize_msg})..."
+        f"Initiating scan on {len(ports)} port(s) with {engine_msg} (Timeout: {args.timeout}s{rate_limit_msg}{randomize_msg})..."
     )
     print("-" * 65)
     print(f"{'PORT':<12}{'STATE':<10}{'SERVICE':<15}")
@@ -179,16 +187,27 @@ def main():
         port_label = f"{port_entry['port']}/tcp"
         print(f"{port_label:<12}{'OPEN':<10}{port_entry['service']:<15}")
 
-    # 5. Multi-threaded scanning loop using queue.Queue & concurrent.futures.ThreadPoolExecutor
-    scan_ports_concurrent(
-        ip=target_ip,
-        ports=ports,
-        timeout=args.timeout,
-        max_workers=args.threads,
-        rate_limit_ms=args.rate_limit,
-        grab_banners=args.banner,
-        on_port_scanned=on_port_discovered,
-    )
+    # 5. Execute Scan: Asynchronous (asyncio) or Multi-threaded (ThreadPoolExecutor)
+    if args.use_async:
+        run_async_scan(
+            ip=target_ip,
+            ports=ports,
+            timeout=args.timeout,
+            concurrency=concurrency,
+            rate_limit_ms=args.rate_limit,
+            grab_banners=args.banner,
+            on_port_scanned=on_port_discovered,
+        )
+    else:
+        scan_ports_concurrent(
+            ip=target_ip,
+            ports=ports,
+            timeout=args.timeout,
+            max_workers=args.threads,
+            rate_limit_ms=args.rate_limit,
+            grab_banners=args.banner,
+            on_port_scanned=on_port_discovered,
+        )
     scan_context["scanned_count"] = len(ports)
 
     # Record exact end time and duration

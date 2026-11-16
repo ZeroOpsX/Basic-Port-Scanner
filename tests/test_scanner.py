@@ -426,6 +426,14 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(TOP_100_PORTS_LIST, original_top_copy)
         self.assertEqual(sorted(args_top_rand.ports_list), sorted(original_top_copy))
 
+    def test_cli_async_flag(self):
+        from utils.cli import parse_arguments
+        args_default = parse_arguments(["-t", "127.0.0.1"])
+        self.assertFalse(args_default.use_async)
+
+        args_async = parse_arguments(["-t", "127.0.0.1", "--async"])
+        self.assertTrue(args_async.use_async)
+
 
 class TestValidators(unittest.TestCase):
     """Tests for utils/validators.py using ipaddress module."""
@@ -542,6 +550,149 @@ class TestHostDiscovery(unittest.TestCase):
     def test_is_host_online_offline(self, mock_icmp, mock_tcp):
         from core.host_discovery import is_host_online
         self.assertFalse(is_host_online("192.0.2.1", fallback_ports=[80]))
+
+
+class TestAsyncScanner(unittest.IsolatedAsyncioTestCase):
+    """Unit tests for core/async_scanner.py using asyncio."""
+
+    @patch("asyncio.open_connection")
+    async def test_async_scan_port_open(self, mock_connect):
+        from core.async_scanner import PortStatus, async_scan_port
+        mock_reader = MagicMock()
+        mock_writer = MagicMock()
+        mock_writer.wait_closed = MagicMock()
+        # In asyncio, wait_closed can be an async mock or coroutine
+        async def fake_wait_closed():
+            return None
+        mock_writer.wait_closed.side_effect = fake_wait_closed
+
+        mock_connect.return_value = (mock_reader, mock_writer)
+
+        status = await async_scan_port("127.0.0.1", 80, timeout=1.0)
+        self.assertEqual(status, PortStatus.OPEN)
+        self.assertTrue(status)
+        mock_writer.close.assert_called_once()
+
+    @patch("asyncio.open_connection", side_effect=ConnectionRefusedError("Connection refused"))
+    async def test_async_scan_port_closed(self, mock_connect):
+        from core.async_scanner import PortStatus, async_scan_port
+        status = await async_scan_port("127.0.0.1", 81, timeout=1.0)
+        self.assertEqual(status, PortStatus.CLOSED)
+        self.assertFalse(status)
+
+    @patch("asyncio.open_connection", side_effect=TimeoutError("Timed out"))
+    async def test_async_scan_port_filtered(self, mock_connect):
+        from core.async_scanner import PortStatus, async_scan_port
+        status = await async_scan_port("127.0.0.1", 443, timeout=1.0)
+        self.assertEqual(status, PortStatus.FILTERED)
+        self.assertFalse(status)
+
+    @patch("asyncio.open_connection")
+    async def test_async_grab_banner(self, mock_connect):
+        from core.async_scanner import async_grab_banner
+        mock_reader = MagicMock()
+        async def fake_read(n):
+            return b"SSH-2.0-OpenSSH_8.9\r\n"
+        mock_reader.read.side_effect = fake_read
+
+        mock_writer = MagicMock()
+        async def fake_drain():
+            return None
+        mock_writer.drain.side_effect = fake_drain
+        async def fake_wait_closed():
+            return None
+        mock_writer.wait_closed.side_effect = fake_wait_closed
+
+        mock_connect.return_value = (mock_reader, mock_writer)
+
+        banner = await async_grab_banner("127.0.0.1", 22, timeout=1.0)
+        self.assertEqual(banner, "SSH-2.0-OpenSSH_8.9")
+
+    @patch("asyncio.open_connection")
+    async def test_scan_ports_async(self, mock_connect):
+        from core.async_scanner import scan_ports_async
+
+        async def fake_open_connection(host, port):
+            if port == 80:
+                mock_reader = MagicMock()
+                mock_writer = MagicMock()
+                async def fake_drain():
+                    return None
+                mock_writer.drain.side_effect = fake_drain
+                async def fake_wait_closed():
+                    return None
+                mock_writer.wait_closed.side_effect = fake_wait_closed
+                return (mock_reader, mock_writer)
+            elif port == 22:
+                raise ConnectionRefusedError("Refused")
+            else:
+                raise TimeoutError("Timed out")
+
+        mock_connect.side_effect = fake_open_connection
+
+        discovered = []
+        def on_scanned(record):
+            discovered.append(record)
+
+        results = await scan_ports_async(
+            ip="127.0.0.1",
+            ports=[80, 22, 443],
+            timeout=1.0,
+            concurrency=10,
+            include_closed=True,
+            on_port_scanned=on_scanned,
+        )
+
+        self.assertEqual(len(results), 3)
+        self.assertEqual([r["port"] for r in results], [22, 80, 443])
+        self.assertEqual(results[0]["state"], "CLOSED")
+        self.assertEqual(results[1]["state"], "OPEN")
+        self.assertEqual(results[1]["service"], "HTTP")
+        self.assertEqual(results[2]["state"], "FILTERED")
+        self.assertEqual(len(discovered), 3)
+
+    @patch("asyncio.open_connection")
+    def test_run_async_scan_synchronous(self, mock_connect):
+        from core.async_scanner import run_async_scan
+        mock_reader = MagicMock()
+        mock_writer = MagicMock()
+        async def fake_drain():
+            return None
+        mock_writer.drain.side_effect = fake_drain
+        async def fake_wait_closed():
+            return None
+        mock_writer.wait_closed.side_effect = fake_wait_closed
+        mock_connect.return_value = (mock_reader, mock_writer)
+
+        results = run_async_scan(
+            ip="127.0.0.1",
+            ports=[80],
+            timeout=1.0,
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["port"], 80)
+        self.assertEqual(results[0]["state"], "OPEN")
+
+    @patch("socket.gethostbyname", return_value="127.0.0.1")
+    @patch("asyncio.open_connection")
+    def test_async_port_scanner_class(self, mock_connect, mock_dns):
+        from core.async_scanner import AsyncPortScanner
+        mock_reader = MagicMock()
+        mock_writer = MagicMock()
+        async def fake_drain():
+            return None
+        mock_writer.drain.side_effect = fake_drain
+        async def fake_wait_closed():
+            return None
+        mock_writer.wait_closed.side_effect = fake_wait_closed
+        mock_connect.return_value = (mock_reader, mock_writer)
+
+        scanner = AsyncPortScanner(target="localhost", timeout=1.0)
+        self.assertEqual(scanner.target_ip, "127.0.0.1")
+
+        results = scanner.scan_ports([80])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["port"], 80)
 
 
 if __name__ == "__main__":
