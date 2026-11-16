@@ -166,12 +166,14 @@ def scan_ports_concurrent(
     grab_banners: bool = False,
     include_closed: bool = False,
     on_port_scanned: Optional[Callable[[Dict], None]] = None,
+    show_progress: bool = True,
 ) -> List[Dict]:
     """
     High-performance multi-threaded port scanner powered by queue.Queue and ThreadPoolExecutor.
 
     Distributes all ports (including full 1-65535 ranges) through a thread-safe queue.Queue.
     Supports optional rate-limiting delays to evade firewall tripwires.
+    Integrates rich.progress live progress bar showing completion % and estimated time remaining.
 
     Args:
         ip: Target IPv4 address or hostname.
@@ -182,6 +184,7 @@ def scan_ports_concurrent(
         grab_banners: Whether to attempt service banner grabbing on open ports.
         include_closed: If True, includes CLOSED and FILTERED ports in results.
         on_port_scanned: Optional callback function invoked when a port probe completes.
+        show_progress: If True, displays a live Rich progress bar during scan.
 
     Returns:
         Sorted list of discovered port dictionaries.
@@ -195,6 +198,22 @@ def scan_ports_concurrent(
 
     results: List[Dict] = []
     results_lock = threading.Lock()
+
+    progress_active = bool(show_progress and RICH_PROGRESS_AVAILABLE and len(ports) > 1)
+    progress = None
+    progress_task = None
+
+    if progress_active:
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=40),
+            TaskProgressColumn(),
+            TextColumn("({task.completed}/{task.total} ports)"),
+            TimeRemainingColumn(),
+            transient=True,
+        )
+        progress_task = progress.add_task(f"[cyan]Scanning {ip}...", total=len(ports))
 
     def _queue_worker() -> None:
         """Worker thread task: pulls ports from queue.Queue until empty."""
@@ -232,15 +251,27 @@ def scan_ports_concurrent(
                 logger.error(f"Error scanning port {port}: {err}")
             finally:
                 port_queue.task_done()
+                if progress_active and progress is not None and progress_task is not None:
+                    progress.advance(progress_task, 1)
 
     # 2. Spawn pool of persistent workers pulling from the queue
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(_queue_worker) for _ in range(workers)]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as err:
-                logger.error(f"Worker thread error: {err}")
+    if progress_active and progress is not None:
+        with progress:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(_queue_worker) for _ in range(workers)]
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as err:
+                        logger.error(f"Worker thread error: {err}")
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(_queue_worker) for _ in range(workers)]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as err:
+                    logger.error(f"Worker thread error: {err}")
 
     # 3. Sort results numerically by port number
     results.sort(key=lambda x: x["port"])

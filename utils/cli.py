@@ -32,7 +32,7 @@ except ImportError:
 
 CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | -iL FILE | TARGET) [-sS] [-sU] [-p PORTS | --common | --top-ports]
                 [--exclude-ports PORTS] [-Pn] [-r] [--async] [-T THREADS] [--timeout TIMEOUT]
-                [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
+                [--rate-limit MS] [-b] [-v] [-oJ] [-oC] [-oH] [-o {json,txt,csv,html}] [-q]"""
 
 CUSTOM_DESCRIPTION = f"""
 ================================================================================
@@ -88,6 +88,12 @@ Examples:
 
   # TCP SYN stealth scan (requires root/admin privileges):
   python main.py -t 192.168.1.1 -sS -p 80,443
+
+  # Verbose scan showing closed/filtered ports and attempts:
+  python main.py -t 192.168.1.1 -p 1-100 -v
+
+  # Export scan report to JSON, CSV, or HTML dark-mode report:
+  python main.py -t 192.168.1.1 --common -oJ -oC -oH
 
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
