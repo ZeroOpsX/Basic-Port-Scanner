@@ -29,11 +29,19 @@ from .service_detector import (
     grab_http_headers,
     map_ports_to_services,
 )
+from .ssl_inspector import (
+    SSLInspector,
+    get_ssl_certificate,
+    inspect_ssl,
+    is_ssl_port,
+    parse_certificate_dict,
+)
 
 __all__ = [
     "PortScanner",
     "AsyncPortScanner",
     "ServiceDetector",
+    "SSLInspector",
     "scan_port",
     "async_scan_port",
     "scan_ports_concurrent",
@@ -52,6 +60,10 @@ __all__ = [
     "extract_http_headers",
     "grab_http_headers",
     "HTTP_PORTS",
+    "inspect_ssl",
+    "get_ssl_certificate",
+    "is_ssl_port",
+    "parse_certificate_dict",
     "PortStatus",
     "PORT_OPEN",
     "PORT_CLOSED",

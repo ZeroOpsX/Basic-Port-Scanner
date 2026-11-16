@@ -2,6 +2,7 @@
 
 import os
 import socket
+import ssl
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -1037,6 +1038,156 @@ class TestServiceDetector(unittest.TestCase):
         mock_http_headers.return_value = {"Server": "Apache"}
         banner_server_only = grab_banner("127.0.0.1", 80)
         self.assertEqual(banner_server_only, "Server: Apache")
+
+
+class TestSSLInspector(unittest.TestCase):
+    """Unit tests for core/ssl_inspector.py."""
+
+    def test_parse_certificate_dict(self):
+        from core.ssl_inspector import parse_certificate_dict
+
+        raw_cert = {
+            "subject": ((("commonName", "scanme.nmap.org"),),),
+            "issuer": (
+                (("countryName", "US"),),
+                (("organizationName", "Let's Encrypt"),),
+                (("commonName", "R3"),),
+            ),
+            "notBefore": "Nov 16 00:00:00 2026 GMT",
+            "notAfter": "Feb 16 23:59:59 2027 GMT",
+            "serialNumber": "04A1B2C3D4",
+            "subjectAltName": (("DNS", "scanme.nmap.org"), ("DNS", "nmap.org")),
+        }
+
+        parsed = parse_certificate_dict(raw_cert)
+        self.assertEqual(parsed["common_name"], "scanme.nmap.org")
+        self.assertEqual(parsed["issuer"], "R3")
+        self.assertEqual(parsed["expiration_date"], "Feb 16 23:59:59 2027 GMT")
+        self.assertEqual(parsed["subject_alt_names"], ["scanme.nmap.org", "nmap.org"])
+        self.assertFalse(parsed["is_expired"])
+        self.assertIsNotNone(parsed["days_left"])
+
+    def test_parse_certificate_dict_empty(self):
+        from core.ssl_inspector import parse_certificate_dict
+        parsed = parse_certificate_dict({})
+        self.assertEqual(parsed["common_name"], "")
+        self.assertEqual(parsed["issuer"], "")
+        self.assertEqual(parsed["expiration_date"], "")
+
+    @patch("ssl._ssl._test_decode_cert")
+    @patch("ssl.DER_cert_to_PEM_cert")
+    @patch("ssl.create_default_context")
+    @patch("socket.socket")
+    def test_inspect_ssl_success(
+        self, mock_socket_cls, mock_ssl_ctx, mock_der_to_pem, mock_decode
+    ):
+        from core.ssl_inspector import inspect_ssl
+
+        mock_raw_sock = MagicMock()
+        mock_socket_cls.return_value = mock_raw_sock
+
+        mock_ssl_sock = MagicMock()
+        mock_ssl_sock.version.return_value = "TLSv1.3"
+        mock_ssl_sock.cipher.return_value = ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+        mock_ssl_sock.getpeercert.return_value = b"\x30\x82\x01..."
+
+        mock_ctx = MagicMock()
+        mock_ctx.wrap_socket.return_value = mock_ssl_sock
+        mock_ssl_ctx.return_value = mock_ctx
+
+        mock_der_to_pem.return_value = "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+        mock_decode.return_value = {
+            "subject": ((("commonName", "secure.example.com"),),),
+            "issuer": ((("organizationName", "DigiCert Inc"),), (("commonName", "DigiCert TLS RSA SHA256"),)),
+            "notAfter": "May 20 12:00:00 2027 GMT",
+        }
+
+        res = inspect_ssl("127.0.0.1", 443, timeout=1.0)
+        self.assertIsNotNone(res)
+        self.assertTrue(res["has_ssl"])
+        self.assertEqual(res["common_name"], "secure.example.com")
+        self.assertEqual(res["issuer"], "DigiCert TLS RSA SHA256")
+        self.assertEqual(res["expiration_date"], "May 20 12:00:00 2027 GMT")
+        self.assertEqual(res["tls_version"], "TLSv1.3")
+        self.assertEqual(res["cipher"], "TLS_AES_256_GCM_SHA384")
+
+    @patch("ssl.create_default_context")
+    @patch("socket.socket")
+    def test_inspect_ssl_non_ssl_port(self, mock_socket_cls, mock_ssl_ctx):
+        from core.ssl_inspector import inspect_ssl
+
+        mock_raw_sock = MagicMock()
+        mock_socket_cls.return_value = mock_raw_sock
+
+        mock_ctx = MagicMock()
+        mock_ctx.wrap_socket.side_effect = ssl.SSLError("UNEXPECTED_EOF_WHILE_READING")
+        mock_ssl_ctx.return_value = mock_ctx
+
+        res = inspect_ssl("127.0.0.1", 80, timeout=1.0)
+        self.assertIsNone(res)
+
+    @patch("socket.socket")
+    def test_inspect_ssl_connection_timeout(self, mock_socket_cls):
+        from core.ssl_inspector import inspect_ssl
+        mock_raw_sock = MagicMock()
+        mock_raw_sock.connect.side_effect = socket.timeout("Timed out")
+        mock_socket_cls.return_value = mock_raw_sock
+
+        res = inspect_ssl("192.0.2.1", 443, timeout=1.0)
+        self.assertIsNone(res)
+
+    @patch("core.ssl_inspector.inspect_ssl")
+    def test_get_ssl_certificate(self, mock_inspect):
+        from core.ssl_inspector import get_ssl_certificate
+        mock_inspect.return_value = {
+            "common_name": "api.example.com",
+            "issuer": "Let's Encrypt",
+            "expiration_date": "Dec 31 23:59:59 2026 GMT",
+            "has_ssl": True,
+        }
+
+        cert = get_ssl_certificate("127.0.0.1", 443)
+        self.assertEqual(
+            cert,
+            {
+                "common_name": "api.example.com",
+                "issuer": "Let's Encrypt",
+                "expiration_date": "Dec 31 23:59:59 2026 GMT",
+            },
+        )
+
+        mock_inspect.return_value = None
+        self.assertIsNone(get_ssl_certificate("127.0.0.1", 80))
+
+    @patch("core.ssl_inspector.inspect_ssl")
+    def test_is_ssl_port(self, mock_inspect):
+        from core.ssl_inspector import is_ssl_port
+        mock_inspect.return_value = {"has_ssl": True}
+        self.assertTrue(is_ssl_port("127.0.0.1", 443))
+
+        mock_inspect.return_value = None
+        self.assertFalse(is_ssl_port("127.0.0.1", 80))
+
+    @patch("core.ssl_inspector.inspect_ssl")
+    def test_ssl_inspector_class(self, mock_inspect):
+        from core.ssl_inspector import SSLInspector
+        mock_inspect.return_value = {
+            "common_name": "portal.example.com",
+            "issuer": "DigiCert",
+            "expiration_date": "Jan 01 00:00:00 2027 GMT",
+            "has_ssl": True,
+        }
+
+        inspector = SSLInspector(timeout=2.5)
+        self.assertEqual(inspector.timeout, 2.5)
+
+        inspected = inspector.inspect("127.0.0.1", 443)
+        self.assertEqual(inspected["common_name"], "portal.example.com")
+
+        cert = inspector.get_certificate("127.0.0.1", 443)
+        self.assertEqual(cert["common_name"], "portal.example.com")
+
+        self.assertTrue(inspector.is_ssl("127.0.0.1", 443))
 
 
 if __name__ == "__main__":
