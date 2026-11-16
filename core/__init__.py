@@ -78,6 +78,8 @@ __all__ = [
     "get_ssl_certificate",
     "is_ssl_port",
     "parse_certificate_dict",
+    "check_ftp_anonymous",
+    "run_port_vulnerability_checks",
     "PortStatus",
     "PORT_OPEN",
     "PORT_CLOSED",
