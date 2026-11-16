@@ -19,10 +19,18 @@ from .scanner import (
     scan_port,
     scan_ports_concurrent,
 )
+from .service_detector import (
+    ServiceDetector,
+    detect_service,
+    get_iana_service_name,
+    get_service_name,
+    map_ports_to_services,
+)
 
 __all__ = [
     "PortScanner",
     "AsyncPortScanner",
+    "ServiceDetector",
     "scan_port",
     "async_scan_port",
     "scan_ports_concurrent",
@@ -34,6 +42,10 @@ __all__ = [
     "is_host_online",
     "icmp_ping",
     "tcp_ping",
+    "get_iana_service_name",
+    "get_service_name",
+    "detect_service",
+    "map_ports_to_services",
     "PortStatus",
     "PORT_OPEN",
     "PORT_CLOSED",

@@ -853,5 +853,69 @@ class TestAsyncScanner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0]["port"], 80)
 
 
+class TestServiceDetector(unittest.TestCase):
+    """Unit tests for core/service_detector.py."""
+
+    def test_get_iana_service_name_standard_ports(self):
+        from core.service_detector import get_iana_service_name
+        self.assertEqual(get_iana_service_name(80), "http")
+        self.assertEqual(get_iana_service_name(22), "ssh")
+        self.assertEqual(get_iana_service_name(443), "https")
+        self.assertEqual(get_iana_service_name(21), "ftp")
+
+    def test_get_iana_service_name_unregistered_and_invalid(self):
+        from core.service_detector import get_iana_service_name
+        self.assertIsNone(get_iana_service_name(54321))
+        self.assertIsNone(get_iana_service_name(0))
+        self.assertIsNone(get_iana_service_name(70000))
+        self.assertIsNone(get_iana_service_name("80"))  # Non-int
+        self.assertIsNone(get_iana_service_name(None))
+
+    def test_get_service_name_with_fallback(self):
+        from core.service_detector import get_service_name
+        # Standard port resolves via IANA
+        self.assertEqual(get_service_name(80), "http")
+        self.assertEqual(get_service_name(22), "ssh")
+
+        # Unknown port falls back to 'unknown' or custom default
+        self.assertEqual(get_service_name(54321, fallback_to_common=False), "unknown")
+        self.assertEqual(get_service_name(54321, default="unassigned", fallback_to_common=False), "unassigned")
+
+    def test_detect_service(self):
+        from core.service_detector import detect_service
+        self.assertEqual(detect_service(80), "http")
+        self.assertEqual(detect_service(22), "ssh")
+        self.assertEqual(detect_service(443), "https")
+
+    def test_map_ports_to_services(self):
+        from core.service_detector import map_ports_to_services
+        mapped = map_ports_to_services([80, 22, 443])
+        self.assertEqual(mapped[80], "http")
+        self.assertEqual(mapped[22], "ssh")
+        self.assertEqual(mapped[443], "https")
+
+    def test_service_detector_class(self):
+        from core.service_detector import ServiceDetector
+        detector = ServiceDetector()
+        self.assertEqual(detector.get_service(80), "http")
+        self.assertEqual(detector.get_service(22), "ssh")
+        self.assertEqual(detector.get_iana_service(80), "http")
+        self.assertIsNone(detector.get_iana_service(54321))
+
+        batch = detector.map_ports([80, 22])
+        self.assertEqual(batch, {80: "http", 22: "ssh"})
+
+    @patch("socket.getservbyport", side_effect=OSError("port/proto not found"))
+    def test_getservbyport_exception_handling(self, mock_getserv):
+        from core.service_detector import get_iana_service_name, get_service_name
+        get_iana_service_name.cache_clear()
+        try:
+            self.assertIsNone(get_iana_service_name(80))
+            # With fallback_to_common=False, should return 'unknown'
+            self.assertEqual(get_service_name(80, fallback_to_common=False), "unknown")
+        finally:
+            get_iana_service_name.cache_clear()
+
+
 if __name__ == "__main__":
     unittest.main()
