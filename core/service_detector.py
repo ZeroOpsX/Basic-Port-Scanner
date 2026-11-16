@@ -112,6 +112,111 @@ def map_ports_to_services(
     return {port: get_service_name(port, protocol) for port in ports}
 
 
+HTTP_PORTS = {80, 443, 8080}
+
+
+def extract_http_headers(raw_response: str) -> Dict[str, str]:
+    """
+    Parses a raw HTTP response string and extracts header key-value pairs,
+    specifically focusing on 'Server' and 'X-Powered-By'.
+
+    Args:
+        raw_response: Raw decoded HTTP response string from the server.
+
+    Returns:
+        Dictionary mapping header names to their extracted values.
+    """
+    headers: Dict[str, str] = {}
+    if not raw_response or not isinstance(raw_response, str):
+        return headers
+
+    lines = raw_response.splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if ":" in line:
+            name, _, value = line.partition(":")
+            clean_name = name.strip()
+            clean_val = value.strip()
+            headers[clean_name.lower()] = clean_val
+            if clean_name.lower() == "server":
+                headers["Server"] = clean_val
+            elif clean_name.lower() == "x-powered-by":
+                headers["X-Powered-By"] = clean_val
+
+    return headers
+
+
+def grab_http_headers(
+    ip: str,
+    port: int,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> Dict[str, str]:
+    """
+    Connects to an open HTTP/HTTPS port, sends an HTTP HEAD request,
+    and extracts the 'Server' and 'X-Powered-By' response headers.
+
+    Args:
+        ip: Target host IP address or hostname.
+        port: HTTP port number (e.g., 80, 443, 8080).
+        timeout: Socket connection and read timeout in seconds.
+
+    Returns:
+        Dictionary containing extracted headers (e.g. {'Server': 'nginx', 'X-Powered-By': 'PHP/8.1'}).
+        Empty dict if connection fails or headers are not present.
+    """
+    sock = None
+    try:
+        raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw_sock.settimeout(timeout)
+        raw_sock.connect((ip, port))
+
+        # Wrap in TLS/SSL context if connecting to port 443
+        if port == 443:
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            try:
+                sock = context.wrap_socket(raw_sock, server_hostname=ip)
+            except Exception:
+                sock = raw_sock
+        else:
+            sock = raw_sock
+
+        head_request = (
+            f"HEAD / HTTP/1.1\r\n"
+            f"Host: {ip}\r\n"
+            f"User-Agent: NetPulse/1.0\r\n"
+            f"Accept: */*\r\n"
+            f"Connection: close\r\n\r\n"
+        )
+        sock.sendall(head_request.encode("utf-8"))
+
+        data = sock.recv(2048)
+        if not data:
+            return {}
+
+        raw_response = data.decode("utf-8", errors="ignore")
+        all_headers = extract_http_headers(raw_response)
+
+        extracted: Dict[str, str] = {}
+        if "Server" in all_headers:
+            extracted["Server"] = all_headers["Server"]
+        if "X-Powered-By" in all_headers:
+            extracted["X-Powered-By"] = all_headers["X-Powered-By"]
+
+        return extracted
+    except (socket.timeout, socket.error, OSError, ssl.SSLError, KeyboardInterrupt):
+        return {}
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
 def grab_banner(
     ip: str,
     port: int,
@@ -119,8 +224,10 @@ def grab_banner(
     probe: bytes = b"\r\n",
 ) -> str:
     """
-    Connects to an open TCP port, sends a dummy byte/newline, and reads
-    up to 1024 bytes of the response banner.
+    Connects to an open TCP port and retrieves the service response banner.
+    If the port is an HTTP/HTTPS port (80, 443, 8080), sends an HTTP HEAD request
+    and extracts the 'Server' and 'X-Powered-By' headers.
+    Otherwise, sends a dummy byte/newline probe and reads up to 1024 bytes.
 
     Args:
         ip: Target host IP address or hostname.
@@ -131,6 +238,18 @@ def grab_banner(
     Returns:
         Decoded response banner string (up to 1024 bytes), or an empty string on error/timeout.
     """
+    # If port is an HTTP/HTTPS port (80, 443, 8080), send an HTTP HEAD request
+    if port in HTTP_PORTS:
+        http_headers = grab_http_headers(ip, port, timeout=timeout)
+        if http_headers:
+            parts = []
+            if "Server" in http_headers:
+                parts.append(f"Server: {http_headers['Server']}")
+            if "X-Powered-By" in http_headers:
+                parts.append(f"X-Powered-By: {http_headers['X-Powered-By']}")
+            if parts:
+                return " | ".join(parts)
+
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
