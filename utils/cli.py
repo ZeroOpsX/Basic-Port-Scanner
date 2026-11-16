@@ -245,6 +245,13 @@ def create_parser() -> argparse.ArgumentParser:
         help="Scan the top 100 most common TCP ports based on Nmap statistics",
     )
     port_group.add_argument(
+        "--exclude-ports",
+        dest="exclude_ports",
+        type=str,
+        default=None,
+        help="Exclude specific ports from the scan queue (e.g. single: 80, list: 80,443, range: 100-200)",
+    )
+    port_group.add_argument(
         "-r",
         "--randomize",
         dest="randomize",
@@ -412,6 +419,23 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
     else:
         # Default standard port range: 1 - 1024
         parsed_args.ports_list = list(range(1, 1025))
+
+    # Apply port exclusions if specified
+    if parsed_args.exclude_ports:
+        try:
+            excluded_set = set(parse_ports(parsed_args.exclude_ports))
+        except ValueError as err:
+            print(f"[!] Error parsing excluded ports: {err}", file=sys.stderr)
+            sys.exit(2)
+
+        parsed_args.excluded_ports_list = sorted(list(excluded_set))
+        parsed_args.ports_list = [p for p in parsed_args.ports_list if p not in excluded_set]
+
+        if not parsed_args.ports_list:
+            print("[!] Error: No ports remaining to scan after applying exclusions.", file=sys.stderr)
+            sys.exit(2)
+    else:
+        parsed_args.excluded_ports_list = []
 
     # Randomize port scan order if requested to evade sequential IDS detection
     if parsed_args.randomize:

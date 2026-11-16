@@ -504,6 +504,37 @@ class TestCLI(unittest.TestCase):
                 parse_arguments([])
         self.assertEqual(cm.exception.code, 2)
 
+    def test_cli_exclude_ports(self):
+        from utils.cli import parse_arguments
+
+        # Test comma-separated exclusion
+        args = parse_arguments(["-t", "127.0.0.1", "-p", "80-85", "--exclude-ports", "80,81,82"])
+        self.assertEqual(args.ports_list, [83, 84, 85])
+        self.assertEqual(args.excluded_ports_list, [80, 81, 82])
+
+        # Test range exclusion
+        args_range = parse_arguments(["-t", "127.0.0.1", "-p", "1-100", "--exclude-ports", "1-90"])
+        self.assertEqual(args_range.ports_list, list(range(91, 101)))
+        self.assertEqual(len(args_range.excluded_ports_list), 90)
+
+        # Test exclusion from --top-ports
+        args_top = parse_arguments(["-t", "127.0.0.1", "--top-ports", "--exclude-ports", "80,443"])
+        self.assertNotIn(80, args_top.ports_list)
+        self.assertNotIn(443, args_top.ports_list)
+        self.assertEqual(len(args_top.ports_list), 98)
+
+        # Test excluding all ports raises SystemExit 2
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.stderr"):
+                parse_arguments(["-t", "127.0.0.1", "-p", "80,443", "--exclude-ports", "80,443"])
+        self.assertEqual(cm.exception.code, 2)
+
+        # Test invalid exclusion port format raises SystemExit 2
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.stderr"):
+                parse_arguments(["-t", "127.0.0.1", "-p", "80-90", "--exclude-ports", "abc"])
+        self.assertEqual(cm.exception.code, 2)
+
 
 class TestValidators(unittest.TestCase):
     """Tests for utils/validators.py using ipaddress module."""

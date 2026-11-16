@@ -168,6 +168,11 @@ def main():
     # Engine messaging
     rate_limit_msg = f" | Rate Limit: {args.rate_limit}ms" if args.rate_limit > 0 else ""
     randomize_msg = " | Order: Randomized" if args.randomize else ""
+    exclude_msg = (
+        f" | Excluded: {len(args.excluded_ports_list)} port(s)"
+        if getattr(args, "exclude_ports", None)
+        else ""
+    )
     if args.use_async:
         concurrency = args.threads if args.threads != 100 else 500
         engine_msg = f"asyncio engine (Concurrency: {concurrency})"
@@ -184,7 +189,7 @@ def main():
 
     logger.info(f"Scan Started at: {start_time_str}")
     logger.info(
-        f"Initiating scan on {len(ports)} port(s) across {len(targets)} host(s) with {engine_msg} (Timeout: {args.timeout}s{rate_limit_msg}{randomize_msg})..."
+        f"Initiating scan on {len(ports)} port(s) across {len(targets)} host(s) with {engine_msg} (Timeout: {args.timeout}s{rate_limit_msg}{randomize_msg}{exclude_msg})..."
     )
     print("-" * 65)
     if multi_host:
