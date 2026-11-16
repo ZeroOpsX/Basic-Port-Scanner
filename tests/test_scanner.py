@@ -960,6 +960,84 @@ class TestServiceDetector(unittest.TestCase):
         self.assertEqual(res, "HTTP/1.1 200 OK")
         mock_gb.assert_called_once_with("127.0.0.1", 80, timeout=1.5)
 
+    def test_extract_http_headers(self):
+        from core.service_detector import extract_http_headers
+
+        sample_resp = (
+            "HTTP/1.1 200 OK\r\n"
+            "Date: Mon, 16 Nov 2026 08:00:00 GMT\r\n"
+            "Server: Apache/2.4.52 (Ubuntu)\r\n"
+            "X-Powered-By: PHP/8.1.2\r\n"
+            "Content-Type: text/html\r\n\r\n"
+        )
+        headers = extract_http_headers(sample_resp)
+        self.assertEqual(headers["Server"], "Apache/2.4.52 (Ubuntu)")
+        self.assertEqual(headers["X-Powered-By"], "PHP/8.1.2")
+        self.assertEqual(headers["server"], "Apache/2.4.52 (Ubuntu)")
+
+        # Empty response
+        self.assertEqual(extract_http_headers(""), {})
+        self.assertEqual(extract_http_headers(None), {})
+
+    @patch("socket.socket")
+    def test_grab_http_headers_port_80(self, mock_socket_cls):
+        from core.service_detector import grab_http_headers
+        mock_sock = MagicMock()
+        mock_sock.recv.return_value = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Server: nginx/1.18.0\r\n"
+            b"X-Powered-By: Express\r\n\r\n"
+        )
+        mock_socket_cls.return_value = mock_sock
+
+        headers = grab_http_headers("127.0.0.1", 80, timeout=1.0)
+        self.assertEqual(headers, {"Server": "nginx/1.18.0", "X-Powered-By": "Express"})
+        # Verify HEAD request was sent
+        sent_data = mock_sock.sendall.call_args[0][0]
+        self.assertTrue(sent_data.startswith(b"HEAD / HTTP/1.1\r\n"))
+
+    @patch("ssl.create_default_context")
+    @patch("socket.socket")
+    def test_grab_http_headers_port_443_ssl(self, mock_socket_cls, mock_ssl_ctx):
+        from core.service_detector import grab_http_headers
+        mock_raw_sock = MagicMock()
+        mock_socket_cls.return_value = mock_raw_sock
+
+        mock_ssl_sock = MagicMock()
+        mock_ssl_sock.recv.return_value = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Server: Cloudflare\r\n\r\n"
+        )
+        mock_ctx_instance = MagicMock()
+        mock_ctx_instance.wrap_socket.return_value = mock_ssl_sock
+        mock_ssl_ctx.return_value = mock_ctx_instance
+
+        headers = grab_http_headers("127.0.0.1", 443, timeout=1.0)
+        self.assertEqual(headers, {"Server": "Cloudflare"})
+        self.assertNotIn("X-Powered-By", headers)
+        mock_ctx_instance.wrap_socket.assert_called_once()
+
+    @patch("core.service_detector.grab_http_headers")
+    def test_grab_banner_http_ports(self, mock_http_headers):
+        from core.service_detector import grab_banner
+        mock_http_headers.return_value = {
+            "Server": "nginx/1.22.0",
+            "X-Powered-By": "Next.js",
+        }
+
+        # Port 80
+        banner_80 = grab_banner("127.0.0.1", 80)
+        self.assertEqual(banner_80, "Server: nginx/1.22.0 | X-Powered-By: Next.js")
+
+        # Port 8080
+        banner_8080 = grab_banner("127.0.0.1", 8080)
+        self.assertEqual(banner_8080, "Server: nginx/1.22.0 | X-Powered-By: Next.js")
+
+        # Only Server header present
+        mock_http_headers.return_value = {"Server": "Apache"}
+        banner_server_only = grab_banner("127.0.0.1", 80)
+        self.assertEqual(banner_server_only, "Server: Apache")
+
 
 if __name__ == "__main__":
     unittest.main()
