@@ -282,7 +282,7 @@ def main():
                 timeout=args.timeout,
                 max_workers=min(args.threads, 30),
                 rate_limit_ms=args.rate_limit,
-                include_open_filtered=False,
+                include_open_filtered=args.verbose,
                 on_port_scanned=cb,
             )
         elif args.use_async:
@@ -293,6 +293,7 @@ def main():
                 concurrency=concurrency,
                 rate_limit_ms=args.rate_limit,
                 grab_banners=args.banner,
+                include_closed=args.verbose,
                 on_port_scanned=cb,
             )
         else:
@@ -303,7 +304,9 @@ def main():
                 max_workers=args.threads,
                 rate_limit_ms=args.rate_limit,
                 grab_banners=args.banner,
+                include_closed=args.verbose,
                 on_port_scanned=cb,
+                show_progress=(not args.quiet and not args.verbose),
             )
         scan_context["scanned_count"] += len(ports)
 
@@ -315,32 +318,63 @@ def main():
     open_ports = scan_context["open_ports"]
     scanned_count = scan_context["scanned_count"]
     total_probes = len(ports) * len(targets)
+    target_ip_str = targets[0][1] if len(targets) == 1 else args.target
 
-    # 6. Detailed Timing & Execution Summary
-    print("-" * 65)
-    print("                    [ SCAN SUMMARY ]")
-    print("-" * 65)
-    print(f"[*] Exact Start Time : {start_time_str}")
-    print(f"[*] Exact End Time   : {end_time_str}")
-    print(f"[*] Total Duration   : {total_duration:.2f} seconds ({format_duration(total_duration)})")
-    if multi_host:
-        print(f"[*] Hosts In Range   : {len(targets)}")
-    print(f"[*] Ports Scanned    : {scanned_count}/{total_probes}")
-    print(f"[*] Open Ports Found : {len(open_ports)}")
-    total_vulns = sum(len(p.get("vulns", [])) for p in open_ports)
-    if total_vulns > 0:
-        print(f"[*] Vulnerabilities  : {total_vulns} flagged")
-    print("-" * 65)
+    # 6. Detailed Timing & Execution Summary Table
+    print_summary_table(
+        results=[p for p in open_ports if str(p.get("state")).upper() == "OPEN"] if not args.verbose else open_ports,
+        target=args.target,
+        target_ip=target_ip_str,
+        duration=total_duration,
+        scanned_count=scanned_count,
+        total_ports=total_probes,
+    )
 
-    # Export scan report if requested
-    if args.output:
-        saved_file = export_results(
-            results=open_ports,
+    # Export scan reports if requested
+    export_list = [p for p in open_ports if str(p.get("state")).upper() == "OPEN"] if not args.verbose else open_ports
+
+    # JSON export (-oJ or -o json)
+    if getattr(args, "export_json", False) or args.output == "json":
+        json_file = export_json(
+            results=export_list,
             target=args.target,
-            target_ip=targets[0][1] if len(targets) == 1 else args.target,
-            export_format=args.output,
+            target_ip=target_ip_str,
+            duration=total_duration,
+            scanned_count=scanned_count,
+            total_ports=total_probes,
         )
-        logger.info(f"Report exported successfully: {saved_file}")
+        logger.info(f"JSON Report exported: {json_file}")
+
+    # CSV export (-oC or -o csv)
+    if getattr(args, "export_csv", False) or args.output == "csv":
+        csv_file = export_csv(
+            results=export_list,
+            target=args.target,
+            target_ip=target_ip_str,
+        )
+        logger.info(f"CSV Report exported: {csv_file}")
+
+    # HTML export (-oH or -o html)
+    if getattr(args, "export_html", False) or args.output == "html":
+        html_file = export_html(
+            results=export_list,
+            target=args.target,
+            target_ip=target_ip_str,
+            duration=total_duration,
+            scanned_count=scanned_count,
+            total_ports=total_probes,
+        )
+        logger.info(f"HTML Report exported: {html_file}")
+
+    # Plain text export (-o txt)
+    if args.output == "txt":
+        saved_file = export_results(
+            results=export_list,
+            target=args.target,
+            target_ip=target_ip_str,
+            export_format="txt",
+        )
+        logger.info(f"Text Report exported: {saved_file}")
 
 
 if __name__ == "__main__":
