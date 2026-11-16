@@ -20,6 +20,19 @@ try:
 except ImportError:
     logger = logging.getLogger("NetPulse")
 
+try:
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        SpinnerColumn,
+        TaskProgressColumn,
+        TextColumn,
+        TimeRemainingColumn,
+    )
+    RICH_PROGRESS_AVAILABLE = True
+except ImportError:
+    RICH_PROGRESS_AVAILABLE = False
+
 
 class PortStatus(str):
     """
