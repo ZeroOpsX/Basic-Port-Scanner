@@ -1984,5 +1984,225 @@ class TestSYNScanner(unittest.TestCase):
         self.assertEqual(cm.exception.code, 1)
 
 
+class TestDisplayModule(unittest.TestCase):
+    """Tests for output/display.py formatting, colors, and Rich summary table."""
+
+    def test_format_state(self):
+        from output.display import format_state
+        self.assertIn("OPEN", format_state("OPEN"))
+        self.assertIn("CLOSED", format_state("CLOSED"))
+        self.assertIn("FILTERED", format_state("FILTERED"))
+
+    def test_print_port_result_open(self):
+        import io
+        from unittest.mock import patch
+        from output.display import print_port_result
+
+        captured = io.StringIO()
+        entry = {
+            "port": 80,
+            "protocol": "tcp",
+            "state": "OPEN",
+            "service": "HTTP",
+            "banner": "Apache/2.4.49",
+        }
+        with patch("sys.stdout", captured):
+            print_port_result(entry, multi_host=False, verbose=False)
+
+        out = captured.getvalue()
+        self.assertIn("80/tcp", out)
+        self.assertIn("OPEN", out)
+        self.assertIn("Apache/2.4.49", out)
+
+    def test_print_port_result_closed_suppressed_when_not_verbose(self):
+        import io
+        from unittest.mock import patch
+        from output.display import print_port_result
+
+        captured = io.StringIO()
+        entry = {
+            "port": 81,
+            "protocol": "tcp",
+            "state": "CLOSED",
+            "service": "Unknown",
+        }
+        with patch("sys.stdout", captured):
+            print_port_result(entry, multi_host=False, verbose=False)
+
+        self.assertEqual(captured.getvalue().strip(), "")
+
+    def test_print_port_result_closed_shown_when_verbose(self):
+        import io
+        from unittest.mock import patch
+        from output.display import print_port_result
+
+        captured = io.StringIO()
+        entry = {
+            "port": 81,
+            "protocol": "tcp",
+            "state": "CLOSED",
+            "service": "Unknown",
+        }
+        with patch("sys.stdout", captured):
+            print_port_result(entry, multi_host=False, verbose=True)
+
+        out = captured.getvalue()
+        self.assertIn("81/tcp", out)
+        self.assertIn("CLOSED", out)
+
+    def test_print_summary_table(self):
+        import io
+        from rich.console import Console
+        from output.display import print_summary_table
+
+        results = [
+            {"port": 80, "protocol": "tcp", "state": "OPEN", "service": "HTTP", "banner": "Apache 2.4.49"},
+            {"port": 443, "protocol": "tcp", "state": "OPEN", "service": "HTTPS", "banner": ""},
+        ]
+        string_io = io.StringIO()
+        test_console = Console(file=string_io, force_terminal=False, width=120)
+
+        print_summary_table(
+            results=results,
+            target="example.com",
+            target_ip="93.184.216.34",
+            duration=1.23,
+            scanned_count=100,
+            total_ports=100,
+            custom_console=test_console,
+        )
+
+        output = string_io.getvalue()
+        self.assertIn("NetPulse Scan Report", output)
+        self.assertIn("80", output)
+        self.assertIn("443", output)
+        self.assertIn("HTTP", output)
+        self.assertIn("HTTPS", output)
+        self.assertIn("Apache 2.4.49", output)
+
+
+class TestExporterModule(unittest.TestCase):
+    """Tests for output/exporter.py JSON, CSV, and HTML report generators."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.sample_results = [
+            {
+                "port": 80,
+                "protocol": "tcp",
+                "state": "OPEN",
+                "service": "HTTP",
+                "banner": "Apache/2.4.49",
+                "vulns": [{"title": "Path Traversal", "flag": "[!] VULN: Path Traversal"}],
+            },
+            {
+                "port": 443,
+                "protocol": "tcp",
+                "state": "OPEN",
+                "service": "HTTPS",
+                "banner": "",
+                "vulns": [],
+            },
+        ]
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_export_json(self):
+        from output.exporter import export_json
+        saved_file = export_json(
+            results=self.sample_results,
+            target="scanme.org",
+            target_ip="192.0.2.1",
+            duration=2.5,
+            scanned_count=10,
+            total_ports=10,
+            output_dir=self.temp_dir.name,
+        )
+        self.assertTrue(os.path.exists(saved_file))
+        with open(saved_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["tool"], "NetPulse Port Scanner")
+        self.assertEqual(data["scan_metadata"]["target"], "scanme.org")
+        self.assertEqual(data["scan_metadata"]["open_ports_count"], 2)
+        self.assertEqual(len(data["results"]), 2)
+
+    def test_export_csv(self):
+        import csv
+        from output.exporter import export_csv
+        saved_file = export_csv(
+            results=self.sample_results,
+            target="scanme.org",
+            target_ip="192.0.2.1",
+            output_dir=self.temp_dir.name,
+        )
+        self.assertTrue(os.path.exists(saved_file))
+        with open(saved_file, "r", encoding="utf-8") as f:
+            reader = list(csv.DictReader(f))
+        self.assertEqual(len(reader), 2)
+        self.assertEqual(reader[0]["Port"], "80")
+        self.assertEqual(reader[0]["Protocol"], "tcp")
+        self.assertEqual(reader[0]["State"], "OPEN")
+        self.assertEqual(reader[0]["Service"], "HTTP")
+        self.assertIn("Path Traversal", reader[0]["Vulnerabilities"])
+
+    def test_export_html_dark_mode(self):
+        from output.exporter import export_html
+        saved_file = export_html(
+            results=self.sample_results,
+            target="scanme.org",
+            target_ip="192.0.2.1",
+            duration=3.14,
+            scanned_count=100,
+            total_ports=100,
+            output_dir=self.temp_dir.name,
+        )
+        self.assertTrue(os.path.exists(saved_file))
+        with open(saved_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("<!DOCTYPE html>", content)
+        self.assertIn("NetPulse Scan Report", content)
+        self.assertIn("scanme.org", content)
+        self.assertIn("Apache/2.4.49", content)
+        self.assertIn("badge-open", content)
+        self.assertIn("badge-vuln", content)
+        # Verify Dark Mode CSS variables exist
+        self.assertIn("--bg: #0f172a", content)
+
+
+class TestCLIExportAndVerboseFlags(unittest.TestCase):
+    """Tests for CLI flags -v, -oJ, -oC, -oH."""
+
+    def test_cli_flags(self):
+        from utils.cli import parse_arguments
+
+        args = parse_arguments(["-t", "127.0.0.1", "-v", "-oJ", "-oC", "-oH"])
+        self.assertTrue(args.verbose)
+        self.assertTrue(args.export_json)
+        self.assertTrue(args.export_csv)
+        self.assertTrue(args.export_html)
+
+
+class TestScannerProgressBar(unittest.TestCase):
+    """Tests for rich.progress live progress bar in core/scanner.py."""
+
+    @patch("socket.socket")
+    def test_scan_ports_concurrent_progress(self, mock_sock_cls):
+        from core.scanner import scan_ports_concurrent
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 0
+        mock_sock_cls.return_value = mock_sock
+
+        # Run with show_progress=True
+        results = scan_ports_concurrent(
+            ip="127.0.0.1",
+            ports=[80, 443],
+            timeout=0.1,
+            max_workers=2,
+            show_progress=True,
+        )
+        self.assertEqual(len(results), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
