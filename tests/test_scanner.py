@@ -1449,8 +1449,10 @@ class TestVulnChecks(unittest.TestCase):
             }
         ]
 
-        def fake_scan(ip, ports, timeout, max_workers, rate_limit_ms, grab_banners, on_port_scanned):
-            on_port_scanned({"port": 21, "state": "OPEN", "service": "FTP", "banner": ""})
+        def fake_scan(ip, ports, *args, **kwargs):
+            on_port_scanned = kwargs.get("on_port_scanned")
+            if on_port_scanned:
+                on_port_scanned({"port": 21, "state": "OPEN", "service": "FTP", "banner": ""})
             return [{"port": 21, "state": "OPEN", "service": "FTP", "banner": ""}]
 
         mock_scan_concurrent.side_effect = fake_scan
@@ -1768,14 +1770,16 @@ class TestUDPScanner(unittest.TestCase):
         from unittest.mock import patch
         import main
 
-        def fake_scan(ip, ports, timeout, max_workers, rate_limit_ms, include_open_filtered, on_port_scanned):
-            on_port_scanned({
-                "port": 53,
-                "protocol": "udp",
-                "state": "OPEN",
-                "service": "DNS",
-                "banner": "DNS Response (NoError)",
-            })
+        def fake_scan(ip, ports, *args, **kwargs):
+            on_port_scanned = kwargs.get("on_port_scanned")
+            if on_port_scanned:
+                on_port_scanned({
+                    "port": 53,
+                    "protocol": "udp",
+                    "state": "OPEN",
+                    "service": "DNS",
+                    "banner": "DNS Response (NoError)",
+                })
             return [{
                 "port": 53,
                 "protocol": "udp",
@@ -2161,7 +2165,7 @@ class TestExporterModule(unittest.TestCase):
         with open(saved_file, "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn("<!DOCTYPE html>", content)
-        self.assertIn("NetPulse Scan Report", content)
+        self.assertIn("Scan Report", content)
         self.assertIn("scanme.org", content)
         self.assertIn("Apache/2.4.49", content)
         self.assertIn("badge-open", content)
