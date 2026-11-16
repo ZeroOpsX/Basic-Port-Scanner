@@ -226,25 +226,17 @@ def main():
     def on_port_discovered(port_entry: dict):
         scan_context["open_ports"].append(port_entry)
         proto = port_entry.get("protocol") or ("udp" if getattr(args, "udp_scan", False) else "tcp")
-        port_label = f"{port_entry['port']}/{proto}"
-        if multi_host:
-            host_label = port_entry.get("host", "")
-            print(f"{host_label:<18}{port_label:<12}{'OPEN':<10}{port_entry['service']:<15}")
-        else:
-            print(f"{port_label:<12}{'OPEN':<10}{port_entry['service']:<15}")
-
-        if port_entry.get("banner"):
-            print(f"  └── Response/Banner: {port_entry['banner']}")
+        port_entry["protocol"] = proto
 
         # Check for service vulnerabilities (e.g., FTP anonymous login on port 21)
-        if proto == "tcp":
+        if proto == "tcp" and str(port_entry.get("state")).upper() == "OPEN":
             host_ip = port_entry.get("host") or (targets[0][1] if len(targets) == 1 else args.target)
             vulns = run_port_vulnerability_checks(host_ip, port_entry["port"], timeout=args.timeout)
             if vulns:
                 port_entry["vulns"] = vulns
-                for vuln in vulns:
-                    flag = vuln.get("flag") or f"[!] VULN: {vuln.get('title')}"
-                    print(f"  └── {flag}")
+
+        # Colorized console output via output/display.py (Open: Green, Closed: Red, Filtered: Yellow, Banner: Cyan)
+        print_port_result(port_entry, multi_host=multi_host, verbose=args.verbose)
 
     # 5. Execute Scan across resolved target hosts
     for canonical_target, target_ip in targets:
