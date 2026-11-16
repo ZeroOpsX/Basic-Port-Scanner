@@ -341,8 +341,29 @@ def create_parser() -> argparse.ArgumentParser:
     scan_group.add_argument(
         "-o",
         "--output",
-        choices=["json", "txt"],
-        help="Export scan results to file in output/ directory (json or txt)",
+        choices=["json", "txt", "csv", "html"],
+        help="Export scan results to file in output/ directory (json, txt, csv, or html)",
+    )
+    scan_group.add_argument(
+        "-oJ",
+        "--json",
+        dest="export_json",
+        action="store_true",
+        help="Save scan results to structured JSON file in output/ directory",
+    )
+    scan_group.add_argument(
+        "-oC",
+        "--csv",
+        dest="export_csv",
+        action="store_true",
+        help="Export scan results table to CSV file for spreadsheet analysis",
+    )
+    scan_group.add_argument(
+        "-oH",
+        "--html",
+        dest="export_html",
+        action="store_true",
+        help="Generate a styled HTML report with dark mode in output/ directory",
     )
 
     # General / Flags
@@ -357,7 +378,7 @@ def create_parser() -> argparse.ArgumentParser:
         "-v",
         "--verbose",
         action="store_true",
-        help="Enable verbose debug output",
+        help="Enable verbose mode: show closed/filtered ports and real-time connection attempts (default: open ports only)",
     )
     misc_group.add_argument(
         "-V",
