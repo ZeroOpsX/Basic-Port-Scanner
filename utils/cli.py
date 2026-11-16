@@ -5,7 +5,9 @@ and port parsing logic for single ports, comma-separated lists, and ranges.
 """
 
 import argparse
+import os
 import random
+import re
 import sys
 from typing import List, Optional
 
@@ -26,7 +28,7 @@ except ImportError:
     COMMON_PORTS_LIST = [20, 21, 22, 23, 25, 53, 80, 110, 143, 443, 3306, 3389, 8080]
     TOP_100_PORTS_LIST = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080, 8443]
 
-CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | TARGET) [-p PORTS | --common | --top-ports]
+CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | -iL FILE | TARGET) [-p PORTS | --common | --top-ports]
                 [-Pn] [-r] [--async] [-T THREADS] [--timeout TIMEOUT] [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
 
 CUSTOM_DESCRIPTION = f"""
@@ -72,9 +74,51 @@ Examples:
   # Scan a CIDR subnet range across multiple hosts:
   python main.py -t 192.168.1.0/24 -p 80,443 --async
 
+  # Scan targets from an input file one by one (like Nmap -iL):
+  python main.py -iL targets.txt -p 80,443
+
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
 """
+
+
+def read_targets_from_file(filepath: str) -> List[str]:
+    """
+    Reads target specifications (IPs, domains, CIDR ranges) from a text file.
+    Supports one target per line, comma or whitespace separation, and strips
+    comments (lines starting with '#' or inline comments).
+
+    Args:
+        filepath: Path to the target text file.
+
+    Returns:
+        List of non-empty target strings.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the file is not a regular file or contains no valid targets.
+    """
+    if not filepath or not os.path.exists(filepath):
+        raise FileNotFoundError(f"Target list file not found: '{filepath}'")
+
+    if not os.path.isfile(filepath):
+        raise ValueError(f"Path is not a regular file: '{filepath}'")
+
+    targets = []
+    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            clean_line = line.strip()
+            if not clean_line or clean_line.startswith("#"):
+                continue
+            # Remove inline comments e.g. "192.168.1.1 # webserver"
+            clean_line = clean_line.split("#")[0].strip()
+            tokens = [t.strip() for t in re.split(r"[\s,]+", clean_line) if t.strip()]
+            targets.extend(tokens)
+
+    if not targets:
+        raise ValueError(f"No valid targets found in file: '{filepath}'")
+
+    return targets
 
 
 def parse_ports(port_input: str) -> List[int]:
@@ -158,6 +202,14 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Target IP address, CIDR range (e.g. 192.168.1.0/24), or domain name (e.g. scanme.nmap.org)",
+    )
+    target_group.add_argument(
+        "-iL",
+        "--input-file",
+        dest="input_file",
+        type=str,
+        default=None,
+        help="Read target list of IPs/domains/CIDR ranges from a .txt file (one per line)",
     )
     target_group.add_argument(
         "positional_target",
@@ -287,19 +339,35 @@ def parse_arguments(args: Optional[List[str]] = None) -> argparse.Namespace:
     parser = create_parser()
     parsed_args = parser.parse_args(args)
 
-    # Resolve target from either -t/--target or positional fallback
+    # Resolve target from -t/--target, positional fallback, or -iL input file
     target = parsed_args.target_flag or parsed_args.positional_target
+    input_file = parsed_args.input_file
 
-    if not target:
+    if not target and not input_file:
         parser.print_usage(sys.stderr)
         print(
-            f"\n[!] Error: Target is required. Use -t/--target <IP/Domain>.\n"
+            f"\n[!] Error: Target is required. Use -t/--target <IP/Domain/CIDR> or -iL <file.txt>.\n"
             f"Run '{parser.prog} --help' for usage and examples.",
             file=sys.stderr,
         )
         sys.exit(2)
 
-    parsed_args.target = target
+    if input_file:
+        try:
+            file_targets = read_targets_from_file(input_file)
+        except (FileNotFoundError, ValueError) as err:
+            print(f"[!] Error loading targets from file: {err}", file=sys.stderr)
+            sys.exit(2)
+
+        if target:
+            parsed_args.targets_list = [target] + file_targets
+            parsed_args.target = f"{target},file:{input_file}"
+        else:
+            parsed_args.targets_list = file_targets
+            parsed_args.target = f"file:{input_file}"
+    else:
+        parsed_args.target = target
+        parsed_args.targets_list = [target]
 
     # Validate timeout argument
     if parsed_args.timeout <= 0:

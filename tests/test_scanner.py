@@ -434,6 +434,76 @@ class TestCLI(unittest.TestCase):
         args_async = parse_arguments(["-t", "127.0.0.1", "--async"])
         self.assertTrue(args_async.use_async)
 
+    def test_read_targets_from_file(self):
+        from utils.cli import read_targets_from_file
+
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".txt") as tf:
+            tf.write("# Header comment\n")
+            tf.write("192.168.1.1\n")
+            tf.write("\n")
+            tf.write("192.168.1.50 # Web Server\n")
+            tf.write("example.com, scanme.nmap.org\n")
+            tf.write("10.0.0.0/30\n")
+            temp_path = tf.name
+
+        try:
+            targets = read_targets_from_file(temp_path)
+            self.assertEqual(
+                targets,
+                ["192.168.1.1", "192.168.1.50", "example.com", "scanme.nmap.org", "10.0.0.0/30"],
+            )
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_read_targets_from_file_errors(self):
+        from utils.cli import read_targets_from_file
+
+        # Non-existent file
+        with self.assertRaises(FileNotFoundError):
+            read_targets_from_file("non_existent_targets_file_12345.txt")
+
+        # Empty file / comments only
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".txt") as tf:
+            tf.write("# Just comments\n\n   \n# More comments\n")
+            empty_path = tf.name
+
+        try:
+            with self.assertRaises(ValueError):
+                read_targets_from_file(empty_path)
+        finally:
+            if os.path.exists(empty_path):
+                os.remove(empty_path)
+
+    def test_cli_il_flag(self):
+        from utils.cli import parse_arguments
+
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".txt") as tf:
+            tf.write("127.0.0.1\n10.0.0.1\n")
+            temp_path = tf.name
+
+        try:
+            args = parse_arguments(["-iL", temp_path, "-p", "80"])
+            self.assertEqual(args.input_file, temp_path)
+            self.assertEqual(args.targets_list, ["127.0.0.1", "10.0.0.1"])
+            self.assertEqual(args.ports_list, [80])
+
+            # Test invalid input file exits with code 2
+            with self.assertRaises(SystemExit) as cm:
+                with patch("sys.stderr"):
+                    parse_arguments(["-iL", "definitely_does_not_exist_file.txt"])
+            self.assertEqual(cm.exception.code, 2)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_cli_missing_target_and_il_exits(self):
+        from utils.cli import parse_arguments
+        with self.assertRaises(SystemExit) as cm:
+            with patch("sys.stderr"):
+                parse_arguments([])
+        self.assertEqual(cm.exception.code, 2)
+
 
 class TestValidators(unittest.TestCase):
     """Tests for utils/validators.py using ipaddress module."""

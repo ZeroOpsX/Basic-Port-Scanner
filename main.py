@@ -138,13 +138,16 @@ def main():
 
     # 4. Validate and resolve target IP/Domain/CIDR using validators.py
     try:
-        targets = resolve_targets(args.target)
+        targets = []
+        raw_targets = getattr(args, "targets_list", [args.target])
+        for t in raw_targets:
+            targets.extend(resolve_targets(t))
     except ValueError as err:
         logger.error(f"Target validation failed: {err}")
         sys.exit(1)
 
     ports = args.ports_list
-    multi_host = len(targets) > 1
+    multi_host = len(targets) > 1 or bool(getattr(args, "input_file", None))
 
     # Record exact start time
     start_timestamp = time.time()
@@ -172,7 +175,9 @@ def main():
         concurrency = args.threads
         engine_msg = f"{args.threads} worker threads"
 
-    if multi_host:
+    if getattr(args, "input_file", None):
+        logger.info(f"Target Source: File '{args.input_file}' ({len(targets)} host(s) to scan)")
+    elif multi_host:
         logger.info(f"Target CIDR: {args.target} (Expanded to {len(targets)} hosts)")
     else:
         logger.info(f"Target: {targets[0][0]} ({targets[0][1]})")
