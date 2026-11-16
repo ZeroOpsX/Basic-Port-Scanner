@@ -937,7 +937,7 @@ class TestServiceDetector(unittest.TestCase):
         mock_sock.recv.return_value = b""
         mock_socket_cls.return_value = mock_sock
 
-        banner = grab_banner("127.0.0.1", 80, timeout=1.0)
+        banner = grab_banner("127.0.0.1", 21, timeout=1.0)
         self.assertEqual(banner, "")
         mock_sock.close.assert_called_once()
 
@@ -948,7 +948,7 @@ class TestServiceDetector(unittest.TestCase):
         mock_sock.connect.side_effect = socket.timeout("Timed out")
         mock_socket_cls.return_value = mock_sock
 
-        banner = grab_banner("127.0.0.1", 443, timeout=1.0)
+        banner = grab_banner("127.0.0.1", 22, timeout=1.0)
         self.assertEqual(banner, "")
         mock_sock.close.assert_called_once()
 
