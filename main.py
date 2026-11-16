@@ -12,7 +12,7 @@ from typing import Any, Dict
 
 from core.async_scanner import run_async_scan
 from core.constants import COMMON_PORTS
-from core.host_discovery import is_host_online
+from core.host_discovery import get_host_os_guess, is_host_online
 from core.scanner import scan_port, scan_ports_concurrent
 from core.syn_scanner import check_admin_privileges, syn_scan_ports
 from core.udp_scanner import scan_udp_ports_concurrent
@@ -204,6 +204,11 @@ def main():
         logger.info(f"Target CIDR: {args.target} (Expanded to {len(targets)} hosts)")
     else:
         logger.info(f"Target: {targets[0][0]} ({targets[0][1]})")
+        os_info = get_host_os_guess(targets[0][1], timeout=args.timeout)
+        if os_info and os_info.get("os") != "Unknown":
+            logger.info(
+                f"Target OS Guess: {os_info['os']} (Observed TTL: {os_info['ttl']}, ~{os_info['hops']} hop{'s' if os_info['hops'] != 1 else ''})"
+            )
 
     logger.info(f"Scan Started at: {start_time_str}")
     logger.info(
@@ -249,6 +254,14 @@ def main():
                 )
                 scan_context["scanned_count"] += len(ports)
                 continue
+
+        # Inspect TTL to guess remote operating system for multi-host scans
+        if multi_host:
+            os_info = get_host_os_guess(target_ip, timeout=args.timeout)
+            if os_info and os_info.get("os") != "Unknown":
+                logger.info(
+                    f"[{target_ip}] OS Guess: {os_info['os']} (Observed TTL: {os_info['ttl']}, ~{os_info['hops']} hop{'s' if os_info['hops'] != 1 else ''})"
+                )
 
         def make_port_callback(host_ip):
             def _cb(entry):

@@ -710,6 +710,89 @@ class TestHostDiscovery(unittest.TestCase):
         from core.host_discovery import is_host_online
         self.assertFalse(is_host_online("192.0.2.1", fallback_ports=[80]))
 
+    def test_extract_ttl_from_ping_output(self):
+        from core.host_discovery import extract_ttl_from_ping_output
+
+        # Windows style output
+        win_output = "Reply from 192.168.1.1: bytes=32 time=1ms TTL=128"
+        self.assertEqual(extract_ttl_from_ping_output(win_output), 128)
+
+        # Linux / Unix style output
+        linux_output = "64 bytes from 10.0.0.1: icmp_seq=1 ttl=64 time=0.045 ms"
+        self.assertEqual(extract_ttl_from_ping_output(linux_output), 64)
+
+        # macOS style
+        mac_output = "64 bytes from 172.16.0.1: icmp_seq=0 ttl=54 time=12.3 ms"
+        self.assertEqual(extract_ttl_from_ping_output(mac_output), 54)
+
+        # Ping failure / no TTL
+        fail_output = "Request timed out."
+        self.assertIsNone(extract_ttl_from_ping_output(fail_output))
+        self.assertIsNone(extract_ttl_from_ping_output(""))
+        self.assertIsNone(extract_ttl_from_ping_output(None))
+
+    def test_guess_os_from_ttl(self):
+        from core.host_discovery import guess_os_from_ttl
+
+        # Linux ~64
+        res_linux = guess_os_from_ttl(64)
+        self.assertEqual(res_linux["os_family"], "Linux")
+        self.assertEqual(res_linux["initial_ttl"], 64)
+        self.assertEqual(res_linux["hops"], 0)
+
+        res_linux_hops = guess_os_from_ttl(56)
+        self.assertEqual(res_linux_hops["os_family"], "Linux")
+        self.assertEqual(res_linux_hops["hops"], 8)
+
+        # Windows ~128
+        res_win = guess_os_from_ttl(128)
+        self.assertEqual(res_win["os_family"], "Windows")
+        self.assertEqual(res_win["initial_ttl"], 128)
+        self.assertEqual(res_win["hops"], 0)
+
+        res_win_hops = guess_os_from_ttl(116)
+        self.assertEqual(res_win_hops["os_family"], "Windows")
+        self.assertEqual(res_win_hops["hops"], 12)
+
+        # Cisco / Solaris ~255
+        res_cisco = guess_os_from_ttl(252)
+        self.assertEqual(res_cisco["os_family"], "Solaris/Cisco")
+        self.assertEqual(res_cisco["initial_ttl"], 255)
+        self.assertEqual(res_cisco["hops"], 3)
+
+        # Out of bounds / invalid
+        res_invalid = guess_os_from_ttl(0)
+        self.assertEqual(res_invalid["os_family"], "Unknown")
+
+        res_high = guess_os_from_ttl(300)
+        self.assertEqual(res_high["os_family"], "Unknown")
+
+    @patch("subprocess.run")
+    def test_ping_and_extract_ttl(self, mock_run):
+        from core.host_discovery import ping_and_extract_ttl
+
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="Reply from 127.0.0.1: bytes=32 time<1ms TTL=128\n",
+        )
+        ttl = ping_and_extract_ttl("127.0.0.1", timeout=1.0)
+        self.assertEqual(ttl, 128)
+
+        mock_run.return_value = MagicMock(returncode=1, stdout="Host unreachable\n")
+        self.assertIsNone(ping_and_extract_ttl("192.0.2.1", timeout=1.0))
+
+    @patch("core.host_discovery.ping_and_extract_ttl")
+    def test_get_host_os_guess(self, mock_extract):
+        from core.host_discovery import get_host_os_guess
+
+        mock_extract.return_value = 64
+        guess = get_host_os_guess("192.168.1.10", timeout=1.0)
+        self.assertIsNotNone(guess)
+        self.assertEqual(guess["os_family"], "Linux")
+
+        mock_extract.return_value = None
+        self.assertIsNone(get_host_os_guess("192.0.2.1", timeout=1.0))
+
 
 class TestAsyncScanner(unittest.IsolatedAsyncioTestCase):
     """Unit tests for core/async_scanner.py using asyncio."""

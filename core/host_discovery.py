@@ -5,9 +5,10 @@ ICMP echo requests (system ping) with TCP ping fallback.
 """
 
 import platform
+import re
 import socket
 import subprocess
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from utils.logger import logger
@@ -118,6 +119,150 @@ def is_host_online(
             return True
 
     return False
+
+
+def extract_ttl_from_ping_output(output: str) -> Optional[int]:
+    """
+    Parses the Time To Live (TTL) integer value from ping command output.
+    Supports Windows (TTL=128), Linux/Unix (ttl=64), and macOS formats.
+
+    Args:
+        output: Raw stdout string from system ping command.
+
+    Returns:
+        Extracted integer TTL value, or None if not found.
+    """
+    if not output or not isinstance(output, str):
+        return None
+
+    match = re.search(r"\bttl[=:]\s*(\d+)", output, re.IGNORECASE)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def guess_os_from_ttl(ttl: int) -> Dict[str, Any]:
+    """
+    Guesses the target operating system family based on observed Time To Live (TTL)
+    from ICMP echo response packets.
+
+    Standard Default Initial TTL Values:
+      - Linux / FreeBSD / macOS / Android / modern Unix: Initial TTL ~64
+      - Windows (XP/7/8/10/11, Windows Server): Initial TTL ~128
+      - Solaris / AIX / Cisco Network Appliances: Initial TTL ~255
+
+    Args:
+        ttl: Observed integer TTL from ping response packet.
+
+    Returns:
+        Dictionary containing:
+          - 'ttl': int (observed TTL)
+          - 'initial_ttl': int (estimated initial TTL before router hops)
+          - 'hops': int (estimated network router hops traversed)
+          - 'os': str (human-readable OS guess)
+          - 'os_family': str ('Linux', 'Windows', 'Solaris/Cisco', 'Unknown')
+          - 'description': str
+    """
+    if ttl <= 0:
+        return {
+            "ttl": ttl,
+            "initial_ttl": None,
+            "hops": 0,
+            "os": "Unknown",
+            "os_family": "Unknown",
+            "description": f"Invalid TTL value: {ttl}",
+        }
+
+    if ttl <= 64:
+        initial = 64
+        hops = initial - ttl
+        os_name = "Linux / macOS"
+        family = "Linux"
+    elif ttl <= 128:
+        initial = 128
+        hops = initial - ttl
+        os_name = "Windows"
+        family = "Windows"
+    elif ttl <= 255:
+        initial = 255
+        hops = initial - ttl
+        os_name = "Solaris / Cisco Network Device"
+        family = "Solaris/Cisco"
+    else:
+        return {
+            "ttl": ttl,
+            "initial_ttl": None,
+            "hops": 0,
+            "os": "Unknown",
+            "os_family": "Unknown",
+            "description": f"Unusual TTL value: {ttl}",
+        }
+
+    return {
+        "ttl": ttl,
+        "initial_ttl": initial,
+        "hops": max(0, hops),
+        "os": os_name,
+        "os_family": family,
+        "description": f"TTL {ttl} (initial ~{initial}, ~{hops} hop{'s' if hops != 1 else ''}) -> {os_name}",
+    }
+
+
+def ping_and_extract_ttl(target: str, timeout: float = 2.0) -> Optional[int]:
+    """
+    Executes a native system ICMP ping, captures stdout, and extracts the response TTL.
+
+    Args:
+        target: Target IP address or hostname.
+        timeout: Ping timeout duration in seconds.
+
+    Returns:
+        Observed TTL integer, or None if ping failed or timed out.
+    """
+    system_os = platform.system().lower()
+
+    if system_os == "windows":
+        timeout_ms = max(500, int(timeout * 1000))
+        cmd = ["ping", "-n", "1", "-w", str(timeout_ms), target]
+    else:
+        timeout_sec = max(1, int(timeout))
+        cmd = ["ping", "-c", "1", "-W", str(timeout_sec), target]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout + 1.0,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout:
+            return extract_ttl_from_ping_output(result.stdout)
+        return None
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError) as err:
+        logger.debug(f"Ping TTL check failed on {target}: {err}")
+        return None
+
+
+def get_host_os_guess(target: str, timeout: float = 2.0) -> Optional[Dict[str, Any]]:
+    """
+    Performs an ICMP ping to observe the TTL and guesses the target operating system.
+
+    Args:
+        target: Target IP address or hostname.
+        timeout: Probe timeout in seconds.
+
+    Returns:
+        OS guess dictionary if responsive, None if host did not respond or TTL missing.
+    """
+    ttl = ping_and_extract_ttl(target, timeout=timeout)
+    if ttl is not None:
+        return guess_os_from_ttl(ttl)
+    return None
 
 
 if __name__ == "__main__":

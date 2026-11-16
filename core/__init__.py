@@ -7,7 +7,15 @@ from .async_scanner import (
     run_async_scan,
     scan_ports_async,
 )
-from .host_discovery import icmp_ping, is_host_online, tcp_ping
+from .host_discovery import (
+    extract_ttl_from_ping_output,
+    get_host_os_guess,
+    guess_os_from_ttl,
+    icmp_ping,
+    is_host_online,
+    ping_and_extract_ttl,
+    tcp_ping,
+)
 from .scanner import (
     PORT_CLOSED,
     PORT_FILTERED,
@@ -83,6 +91,10 @@ __all__ = [
     "is_host_online",
     "icmp_ping",
     "tcp_ping",
+    "extract_ttl_from_ping_output",
+    "guess_os_from_ttl",
+    "ping_and_extract_ttl",
+    "get_host_os_guess",
     "get_iana_service_name",
     "get_service_name",
     "detect_service",
