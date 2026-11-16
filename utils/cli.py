@@ -29,7 +29,8 @@ except ImportError:
     TOP_100_PORTS_LIST = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 5900, 8080, 8443]
 
 CUSTOM_USAGE = """%(prog)s [-h] (-t TARGET | -iL FILE | TARGET) [-p PORTS | --common | --top-ports]
-                [-Pn] [-r] [--async] [-T THREADS] [--timeout TIMEOUT] [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
+                [--exclude-ports PORTS] [-Pn] [-r] [--async] [-T THREADS] [--timeout TIMEOUT]
+                [--rate-limit MS] [-b] [-o {json,txt}] [-q] [-v]"""
 
 CUSTOM_DESCRIPTION = f"""
 ================================================================================
@@ -76,6 +77,9 @@ Examples:
 
   # Scan targets from an input file one by one (like Nmap -iL):
   python main.py -iL targets.txt -p 80,443
+
+  # Exclude specific ports from scan (e.g. skip sensitive ports):
+  python main.py -t 192.168.1.1 -p 1-1000 --exclude-ports 80,443,8000-8080
 
   # Skip host alive check and force port scan (like Nmap -Pn):
   python main.py -t 192.168.1.1 -p 80,443 -Pn
